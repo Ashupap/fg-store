@@ -13,7 +13,10 @@ echo "📥 Pulling latest changes from Git..."
 git pull origin main || { echo "❌ Git pull failed"; exit 1; }
 
 # 2. Check for .env
-if [ ! -f .env ]; then
+if [ -f src/.env ]; then
+    echo "⚠️  Found .env in src directory. Copying to root..."
+    cp src/.env .env
+elif [ ! -f .env ]; then
     echo "⚠️  .env file not found! Copying from .env.example..."
     cp .env.example .env
     echo "❗ Please update .env with real secrets before proceeding."
