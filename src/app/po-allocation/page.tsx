@@ -411,7 +411,8 @@ export default function POAllocationPage() {
                                                                                 }}
                                                                                 size="sm"
                                                                                 variant="destructive"
-                                                                                className="h-8 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                                className="h-8 text-xs"
+                                                                                disabled={po.status === 'Dispatched' || po.status === 'Fulfilled'}
                                                                             >
                                                                                 Release
                                                                             </Button>
