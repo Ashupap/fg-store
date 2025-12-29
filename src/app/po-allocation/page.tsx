@@ -412,7 +412,7 @@ export default function POAllocationPage() {
                                                                                 size="sm"
                                                                                 variant="destructive"
                                                                                 className="h-8 text-xs"
-                                                                                disabled={po.status === 'Dispatched' || po.status === 'Fulfilled'}
+                                                                                disabled={po.status === 'Dispatched'}
                                                                             >
                                                                                 Release
                                                                             </Button>
