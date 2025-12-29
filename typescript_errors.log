@@ -1,0 +1,24 @@
+.next/types/validator.ts(126,31): error TS2344: Type 'typeof import("D:/New Apps/FG Store/fg-store/src/app/api/admin/[resource]/route")' does not satisfy the constraint 'RouteHandlerConfig<"/api/admin/[resource]">'.
+  Types of property 'GET' are incompatible.
+    Type '(request: NextRequest, { params }: { params: { resource: string; }; }) => Promise<NextResponse<{ success: boolean; error: string; }> | NextResponse<{ success: boolean; data: unknown[]; }>>' is not assignable to type '(request: NextRequest, context: { params: Promise<{ resource: string; }>; }) => void | Response | Promise<void | Response>'.
+      Types of parameters '__1' and 'context' are incompatible.
+        Type '{ params: Promise<{ resource: string; }>; }' is not assignable to type '{ params: { resource: string; }; }'.
+          Types of property 'params' are incompatible.
+            Property 'resource' is missing in type 'Promise<{ resource: string; }>' but required in type '{ resource: string; }'.
+.next/types/validator.ts(207,31): error TS2344: Type 'typeof import("D:/New Apps/FG Store/fg-store/src/app/api/movement/[id]/approve/route")' does not satisfy the constraint 'RouteHandlerConfig<"/api/movement/[id]/approve">'.
+  Types of property 'POST' are incompatible.
+    Type '(request: NextRequest, { params }: { params: { id: string; }; }) => Promise<NextResponse<{ success: boolean; error: string | undefined; }> | NextResponse<{ success: boolean; data: MovementResult; }>>' is not assignable to type '(request: NextRequest, context: { params: Promise<{ id: string; }>; }) => void | Response | Promise<void | Response>'.
+      Types of parameters '__1' and 'context' are incompatible.
+        Type '{ params: Promise<{ id: string; }>; }' is not assignable to type '{ params: { id: string; }; }'.
+          Types of property 'params' are incompatible.
+            Property 'id' is missing in type 'Promise<{ id: string; }>' but required in type '{ id: string; }'.
+.next/types/validator.ts(216,31): error TS2344: Type 'typeof import("D:/New Apps/FG Store/fg-store/src/app/api/movement/[id]/reject/route")' does not satisfy the constraint 'RouteHandlerConfig<"/api/movement/[id]/reject">'.
+  Types of property 'POST' are incompatible.
+    Type '(request: NextRequest, { params }: { params: { id: string; }; }) => Promise<NextResponse<{ success: boolean; error: string; }> | NextResponse<{ success: boolean; message: string; }>>' is not assignable to type '(request: NextRequest, context: { params: Promise<{ id: string; }>; }) => void | Response | Promise<void | Response>'.
+      Types of parameters '__1' and 'context' are incompatible.
+        Type '{ params: Promise<{ id: string; }>; }' is not assignable to type '{ params: { id: string; }; }'.
+          Types of property 'params' are incompatible.
+            Property 'id' is missing in type 'Promise<{ id: string; }>' but required in type '{ id: string; }'.
+src/app/api/auth/login/route.ts(14,59): error TS2339: Property 'errors' does not exist on type 'ZodError<{ email: string; password: string; }>'.
+src/app/api/dashboard/export/route.ts(198,33): error TS2345: Argument of type 'Buffer<ArrayBufferLike>' is not assignable to parameter of type 'BodyInit | null | undefined'.
+  Type 'Buffer<ArrayBufferLike>' is missing the following properties from type 'URLSearchParams': size, append, delete, get, and 2 more.

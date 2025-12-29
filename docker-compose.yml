@@ -1,0 +1,21 @@
+
+version: '3.8'
+
+services:
+  app:
+    container_name: fg-store
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persist SQLite Database and Data
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      # Ensure data is written to the mounted volume
+      # The app uses process.cwd() + /data, which resolves to /app/data in the container
