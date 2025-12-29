@@ -60,6 +60,16 @@ function initializeTables(db: Database.Database) {
     console.error('Migration failed:', err);
   }
 
+  // SEED: Default Admin User
+  const adminExists = db.prepare("SELECT count(*) as count FROM users WHERE username = 'admin'").get() as { count: number };
+  if (adminExists.count === 0) {
+    console.log('Seeding default admin user...');
+    db.prepare(`
+          INSERT INTO users (username, email, password_hash, name, role)
+          VALUES (?, ?, ?, ?, ?)
+      `).run('admin', 'admin@fgstore.com', '$2b$10$W54X5OXCm03OLBT1xLDuw.2aYBA8n7OOUAX1.OOLUUQFTpdnd4zKtS', 'System Admin', 'admin');
+  }
+
   // Master Data table
   db.exec(`
     CREATE TABLE IF NOT EXISTS master_data (
