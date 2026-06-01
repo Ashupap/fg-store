@@ -1,6 +1,6 @@
 import { getDb } from '@/lib/db';
 import { generateMovementId, generateMCNumber, getNextMCSequence, formatDate, packingToCode } from '@/lib/utils';
-import { inwardMovementSchema, transferMovementSchema, dispatchMovementSchema } from '@/lib/validations';
+import { inwardMovementSchema, transferMovementSchema, dispatchMovementSchema, repackStartSchema, repackCompleteSchema } from '@/lib/validations';
 import type { MovementResult } from '@/types';
 import { processGlobalPendingAllocations } from '@/lib/allocation';
 
@@ -354,5 +354,172 @@ export async function handleDispatch(data: unknown, userId: number, existingMove
     } catch (error) {
         console.error('Dispatch transaction error:', error);
         return { success: false, error: 'Failed to process dispatch' };
+    }
+}
+
+// Handle REPACKING OUT - Store to Production
+export async function handleRepackOut(data: unknown, userId: number): Promise<MovementResult> {
+    console.log('[StockLogic] Handling Repack Out:', JSON.stringify(data));
+    const validation = repackStartSchema.safeParse(data);
+    if (!validation.success) {
+        return { success: false, error: validation.error.errors?.[0]?.message || 'Validation failed' };
+    }
+
+    const { fromStore, mcNumbers, remarks } = validation.data;
+    const db = getDb();
+    const movementId = generateMovementId();
+
+    // Verify MCs exist and are in the correct store
+    const placeholders = mcNumbers.map(() => '?').join(',');
+    const stocks = db.prepare(`
+        SELECT id, mc_number, status, reserved_for_po, reserved_line_item 
+        FROM fg_stock_master 
+        WHERE mc_number IN (${placeholders}) AND cold_store = ?
+    `).all(...mcNumbers, fromStore) as any[];
+
+    if (stocks.length !== mcNumbers.length) {
+        return { success: false, error: 'One or more MCs are invalid or not in the selected store' };
+    }
+
+    const updateStock = db.prepare(`
+        UPDATE fg_stock_master 
+        SET status = 'In Repacking', cold_store = 'Production', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+    `);
+
+    const insertMovement = db.prepare(`
+        INSERT INTO stock_movement_log (movement_id, movement_datetime, action_type, from_location, to_location, mc_numbers, qty_mcs, moved_by_id, status, remarks)
+        VALUES (?, ?, 'REPACK_OUT', ?, 'Production', ?, ?, ?, 'Completed', ?)
+    `);
+
+    const transaction = db.transaction(() => {
+        for (const stock of stocks) {
+            updateStock.run(stock.id);
+        }
+
+        insertMovement.run(
+            movementId,
+            new Date().toISOString(),
+            fromStore,
+            mcNumbers.join(','),
+            stocks.length,
+            userId,
+            remarks || 'Sent for repacking'
+        );
+    });
+
+    try {
+        transaction();
+        return { success: true, moveId: movementId, movedCount: stocks.length };
+    } catch (error) {
+        console.error('Repack Out transaction error:', error);
+        return { success: false, error: 'Failed to process repacking exit' };
+    }
+}
+
+// Handle REPACKING IN - Production to Store
+export async function handleRepackIn(data: unknown, userId: number): Promise<MovementResult> {
+    console.log('[StockLogic] Handling Repack In:', JSON.stringify(data));
+    const validation = repackCompleteSchema.safeParse(data);
+    if (!validation.success) {
+        return { success: false, error: validation.error.errors?.[0]?.message || 'Validation failed' };
+    }
+
+    const { originalMcNumbers, toStore, newPacking, items, remarks } = validation.data;
+    const db = getDb();
+    const movementId = generateMovementId();
+    const packingCode = packingToCode(newPacking);
+
+    // Fetch original MCs to inherit metadata (Variety, Grade, PO Allocation)
+    const placeholders = originalMcNumbers.map(() => '?').join(',');
+    const parents = db.prepare(`
+        SELECT * FROM fg_stock_master WHERE mc_number IN (${placeholders})
+    `).all(...originalMcNumbers) as any[];
+
+    if (parents.length === 0) {
+        return { success: false, error: 'Original MCs not found' };
+    }
+
+    // Business Logic: Use the first parent as the template for variety/grade/allocation
+    const template = parents[0];
+
+    const insertStock = db.prepare(`
+        INSERT INTO fg_stock_master (
+            mc_number, grade, variety, type, packing_code, packing_date, 
+            cold_store, status, reserved_for_po, reserved_line_item, 
+            parent_mc_id, is_repacked, created_by_id, barcode
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `);
+
+    const markOriginalAsRepacked = db.prepare(`
+        UPDATE fg_stock_master SET status = 'Repacked', updated_at = CURRENT_TIMESTAMP WHERE mc_number = ?
+    `);
+
+    const insertMovement = db.prepare(`
+        INSERT INTO stock_movement_log (
+            movement_id, movement_datetime, action_type, from_location, to_location, 
+            type, variety, packing, grade, mc_numbers, qty_mcs, moved_by_id, status, remarks
+        )
+        VALUES (?, ?, 'REPACK_IN', 'Production', ?, ?, ?, ?, ?, ?, ?, ?, 'Completed', ?)
+    `);
+
+    const transaction = db.transaction(() => {
+        const newMcNumbers: string[] = [];
+        const packingDate = formatDate(new Date());
+
+        // Create new MCs
+        for (const item of items) {
+            // Inheritance logic
+            const status = template.reserved_for_po ? 'Allocated' : 'Available';
+
+            insertStock.run(
+                item.mcNumber,
+                template.grade,
+                template.variety,
+                template.type,
+                packingCode,
+                packingDate,
+                toStore,
+                status,
+                template.reserved_for_po,
+                template.reserved_line_item,
+                template.id, // Link to first parent for now
+                userId,
+                item.barcode || null
+            );
+            newMcNumbers.push(item.mcNumber);
+        }
+
+        // Deactivate original MCs
+        for (const mcNumber of originalMcNumbers) {
+            markOriginalAsRepacked.run(mcNumber);
+        }
+
+        // Log movement
+        insertMovement.run(
+            movementId,
+            new Date().toISOString(),
+            toStore,
+            template.type,
+            template.variety,
+            newPacking,
+            template.grade,
+            newMcNumbers.join(','),
+            items.length,
+            userId,
+            remarks || `Repacked from ${originalMcNumbers.length} MCs`
+        );
+    });
+
+    try {
+        transaction();
+        return { success: true, moveId: movementId, movedCount: items.length };
+    } catch (error: any) {
+        console.error('Repack In transaction error:', error);
+        if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+            return { success: false, error: 'One or more new MC numbers or barcodes already exist.' };
+        }
+        return { success: false, error: 'Failed to process repacking return' };
     }
 }

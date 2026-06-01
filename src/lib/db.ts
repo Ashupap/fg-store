@@ -109,16 +109,29 @@ function initializeTables(db: Database.Database) {
     )
   `);
 
-  // Migration: Add barcode column to fg_stock_master
+  // Migration: Add barcode and repacking columns to fg_stock_master
   try {
     const tableInfo = db.prepare("PRAGMA table_info(fg_stock_master)").all() as any[];
+    
+    // Barcode migration
     const hasBarcode = tableInfo.some(col => col.name === 'barcode');
     if (!hasBarcode) {
       db.exec("ALTER TABLE fg_stock_master ADD COLUMN barcode TEXT");
       db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_fg_stock_barcode ON fg_stock_master(barcode) WHERE barcode IS NOT NULL");
     }
+
+    // Repacking migrations
+    const hasParentMcId = tableInfo.some(col => col.name === 'parent_mc_id');
+    if (!hasParentMcId) {
+      db.exec("ALTER TABLE fg_stock_master ADD COLUMN parent_mc_id INTEGER REFERENCES fg_stock_master(id)");
+    }
+
+    const hasIsRepacked = tableInfo.some(col => col.name === 'is_repacked');
+    if (!hasIsRepacked) {
+      db.exec("ALTER TABLE fg_stock_master ADD COLUMN is_repacked INTEGER DEFAULT 0");
+    }
   } catch (err) {
-    console.error('Migration for barcode failed:', err);
+    console.error('Migration for fg_stock_master columns failed:', err);
   }
 
 
@@ -183,6 +196,7 @@ function initializeTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_fg_stock_packing ON fg_stock_master(packing_code);
     CREATE INDEX IF NOT EXISTS idx_fg_stock_cold_store ON fg_stock_master(cold_store);
     CREATE INDEX IF NOT EXISTS idx_fg_stock_status ON fg_stock_master(status);
+    CREATE INDEX IF NOT EXISTS idx_fg_stock_parent ON fg_stock_master(parent_mc_id);
     CREATE INDEX IF NOT EXISTS idx_movement_action ON stock_movement_log(action_type);
     CREATE INDEX IF NOT EXISTS idx_movement_datetime ON stock_movement_log(movement_datetime);
   `);

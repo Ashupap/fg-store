@@ -47,6 +47,25 @@ export const dispatchMovementSchema = z.object({
     poId: z.number().nullish(), // Linked PO ID (for Sale)
 });
 
+// Repacking Start validation
+export const repackStartSchema = z.object({
+    fromStore: z.string().min(1, 'From Store is required'),
+    mcNumbers: z.array(z.string()).min(1, 'At least one MC must be selected'),
+    remarks: z.string().nullish(),
+});
+
+// Repacking Complete validation
+export const repackCompleteSchema = z.object({
+    originalMcNumbers: z.array(z.string()).min(1, 'Original MC numbers required'),
+    toStore: z.string().min(1, 'To Store is required'),
+    newPacking: z.string().min(1, 'New Packing label is required'),
+    items: z.array(z.object({
+        mcNumber: z.string().min(1, 'New MC number required'),
+        barcode: z.string().nullish(),
+    })).min(1, 'At least one new MC must be created'),
+    remarks: z.string().nullish(),
+});
+
 // Master data validation
 export const masterDataSchema = z.object({
     grade: z.string().optional(),
@@ -89,4 +108,6 @@ export const allocationSchema = z.object({
 export type POLineItemInput = z.infer<typeof poLineItemSchema>;
 export type CreatePOInput = z.infer<typeof createPOSchema>;
 export type AllocationInput = z.infer<typeof allocationSchema>;
+export type RepackStartInput = z.infer<typeof repackStartSchema>;
+export type RepackCompleteInput = z.infer<typeof repackCompleteSchema>;
 

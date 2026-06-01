@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 import { generateMovementId } from '@/lib/utils';
-import { inwardMovementSchema, transferMovementSchema, dispatchMovementSchema } from '@/lib/validations';
+import { inwardMovementSchema, transferMovementSchema, dispatchMovementSchema, repackStartSchema, repackCompleteSchema } from '@/lib/validations';
 import type { MovementResult } from '@/types';
-import { handleInward, handleTransfer, handleDispatch } from '@/lib/stock-logic';
+import { handleInward, handleTransfer, handleDispatch, handleRepackOut, handleRepackIn } from '@/lib/stock-logic';
 
 // POST /api/movement - Handle all movement types
 export async function POST(request: NextRequest) {
@@ -34,11 +34,17 @@ export async function POST(request: NextRequest) {
                 if (!targetStore || !allowedStores.includes(targetStore)) {
                     return NextResponse.json({ success: false, error: `Unauthorized: You are not assigned to receive stock at '${targetStore}'` }, { status: 403 });
                 }
-            } else if (actionType === 'TRANSFER' || actionType === 'DISPATCH') {
-                // For Transfer/Return, user MUST be assigned to the Source store
+            } else if (actionType === 'TRANSFER' || actionType === 'DISPATCH' || actionType === 'REPACK_OUT') {
+                // For Transfer/Return/Repack Out, user MUST be assigned to the Source store
                 const sourceStore = movementData.fromStore;
                 if (!sourceStore || !allowedStores.includes(sourceStore)) {
                     return NextResponse.json({ success: false, error: `Unauthorized: You are not assigned to move stock from '${sourceStore}'` }, { status: 403 });
+                }
+            } else if (actionType === 'REPACK_IN') {
+                // For Repack In, user MUST be assigned to the Destination store
+                const targetStore = movementData.toStore;
+                if (!targetStore || !allowedStores.includes(targetStore)) {
+                    return NextResponse.json({ success: false, error: `Unauthorized: You are not assigned to receive stock at '${targetStore}'` }, { status: 403 });
                 }
             }
         }
@@ -62,6 +68,12 @@ export async function POST(request: NextRequest) {
                     break;
                 case 'DISPATCH':
                     result = await handleDispatch(movementData, userId, undefined, specificMCNumbers);
+                    break;
+                case 'REPACK_OUT':
+                    result = await handleRepackOut(movementData, userId);
+                    break;
+                case 'REPACK_IN':
+                    result = await handleRepackIn(movementData, userId);
                     break;
                 default:
                     return NextResponse.json(
@@ -196,6 +208,8 @@ async function createPendingRequest(data: any, userId: number, actionType: strin
     if (actionType === 'INWARD') validation = inwardMovementSchema.safeParse(data);
     else if (actionType === 'TRANSFER') validation = transferMovementSchema.safeParse(data);
     else if (actionType === 'DISPATCH') validation = dispatchMovementSchema.safeParse(data);
+    else if (actionType === 'REPACK_OUT') validation = repackStartSchema.safeParse(data);
+    else if (actionType === 'REPACK_IN') validation = repackCompleteSchema.safeParse(data);
     else return { success: false, error: 'Invalid action type' };
 
     if (!validation.success) {

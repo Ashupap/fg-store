@@ -10,7 +10,7 @@ echo "========================================"
 
 # 1. Pull latest code
 echo "📥 Pulling latest changes from Git..."
-git pull origin main || { echo "❌ Git pull failed"; exit 1; }
+git pull origin master || { echo "❌ Git pull failed"; exit 1; }
 
 # 2. Check for .env
 if [ -f src/.env ]; then
@@ -24,7 +24,7 @@ fi
 
 # 3. Build and Start Containers
 echo "🔄 Rebuilding and restarting application..."
-docker compose up -d --build remove-orphans
+docker compose up -d --build
 
 # 4. Cleanup
 echo "🧹 Cleaning up old docker images..."

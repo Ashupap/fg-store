@@ -27,7 +27,10 @@ import {
     ArrowUpRight,
     Pencil,
     Printer,
-    Download
+    Download,
+    History,
+    Layers,
+    Scissors
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import type { StockSummary, UserPublic } from '@/types';
@@ -46,7 +49,7 @@ interface MasterData {
     coldStores: string[];
 }
 
-type MovementType = 'INWARD' | 'TRANSFER' | 'DISPATCH';
+type MovementType = 'INWARD' | 'TRANSFER' | 'DISPATCH' | 'REPACK_OUT' | 'REPACK_IN';
 
 export default function StockMovementPage() {
     const router = useRouter();
@@ -57,6 +60,7 @@ export default function StockMovementPage() {
     const [history, setHistory] = useState<any[]>([]);
     const [masterData, setMasterData] = useState<MasterData | null>(null);
     const [settings, setSettings] = useState<{ [key: string]: string }>({});
+    const [inRepackingStock, setInRepackingStock] = useState<any[]>([]);
 
     // UI State
     const [showModal, setShowModal] = useState(false);
@@ -73,6 +77,8 @@ export default function StockMovementPage() {
     const [activePOs, setActivePOs] = useState<any[]>([]);
     const [dispatchPurpose, setDispatchPurpose] = useState<'SALE' | 'REPACKING'>('SALE');
     const [selectedPO, setSelectedPO] = useState<string>('');
+    const [poLineItems, setPoLineItems] = useState<any[]>([]);
+    const [selectedLineItem, setSelectedLineItem] = useState<string>('');
 
     // Scanning State
     const [isScanMode, setIsScanMode] = useState(false);
@@ -160,6 +166,7 @@ export default function StockMovementPage() {
         fetchMasterData();
         fetchSettings();
         fetchActivePOs();
+        fetchInRepackingStock();
     };
 
     const fetchStockSummary = async () => {
@@ -222,6 +229,49 @@ export default function StockMovementPage() {
             const response = await fetch('/api/po/active');
             const result = await response.json();
             if (result.success) setActivePOs(result.data);
+        } catch (error) { console.error(error); }
+    };
+
+    const fetchInRepackingStock = async () => {
+        try {
+            const response = await fetch('/api/stock?status=In Repacking');
+            const result = await response.json();
+            if (result.success) setInRepackingStock(result.data);
+        } catch (error) { console.error(error); }
+    };
+
+    const fetchPOLineItems = async (poId: string) => {
+        try {
+            const response = await fetch(`/api/po/items?poId=${poId}`);
+            const result = await response.json();
+            if (result.success) setPoLineItems(result.data);
+        } catch (error) { console.error(error); }
+    };
+
+    const handlePOChange = async (poId: string) => {
+        setSelectedPO(poId);
+        setSelectedLineItem('');
+        setPoLineItems([]);
+        if (poId) {
+            await fetchPOLineItems(poId);
+            const po = activePOs.find(p => p.id.toString() === poId);
+            if (po && po.customer && movementType === 'DISPATCH') {
+                setFormData(prev => ({ ...prev, toStore: po.customer }));
+            }
+        }
+    };
+
+    const fetchAllocatedStock = async (poId: number, lineItemId: number) => {
+        try {
+            // We need a way to fetch stock by PO and Line Item
+            const response = await fetch(`/api/stock/allocated?poId=${poId}&lineItemId=${lineItemId}`);
+            const result = await response.json();
+            if (result.success) {
+                const mcNumbers = result.data.map((s: any) => s.mc_number);
+                setScannedMCs(mcNumbers);
+                setIsScanMode(true);
+                setFormData(prev => ({ ...prev, qty: mcNumbers.length.toString() }));
+            }
         } catch (error) { console.error(error); }
     };
 
@@ -341,7 +391,12 @@ export default function StockMovementPage() {
                 specificMCNumbers: (isScanMode && movementType !== 'INWARD') ? scannedMCs : undefined,
                 barcodes: (isScanMode && movementType === 'INWARD') ? scannedMCs : undefined,
                 dispatchPurpose: movementType === 'DISPATCH' ? dispatchPurpose : undefined,
-                poId: (movementType === 'DISPATCH' && dispatchPurpose === 'SALE' && selectedPO) ? parseInt(selectedPO) : undefined
+                poId: (movementType === 'DISPATCH' && dispatchPurpose === 'SALE' && selectedPO) ? parseInt(selectedPO) : undefined,
+                // Repacking specifics
+                originalMcNumbers: movementType === 'REPACK_IN' ? (formData as any).originalMcNumbers : undefined,
+                items: movementType === 'REPACK_IN' ? scannedMCs.map(mc => ({ mcNumber: mc })) : undefined,
+                mcNumbers: movementType === 'REPACK_OUT' ? scannedMCs : undefined,
+                newPacking: movementType === 'REPACK_IN' ? formData.packing : undefined,
             };
 
             let response;
@@ -493,6 +548,12 @@ export default function StockMovementPage() {
                                     <Button onClick={() => openModal('DISPATCH')} variant="secondary" className="gap-2 bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-200 flex-1 sm:flex-none">
                                         <Truck size={18} /> Dispatch
                                     </Button>
+                                    <Button onClick={() => openModal('REPACK_OUT')} variant="outline" className="gap-2 border-indigo-200 bg-indigo-50/50 text-indigo-700 hover:bg-indigo-100 flex-1 sm:flex-none">
+                                        <Scissors size={18} /> Repack Out
+                                    </Button>
+                                    <Button onClick={() => openModal('REPACK_IN')} variant="outline" className="gap-2 border-purple-200 bg-purple-50/50 text-purple-700 hover:bg-purple-100 flex-1 sm:flex-none">
+                                        <Layers size={18} /> Repack In
+                                    </Button>
                                     <Button onClick={handleExport} variant="outline" className="gap-2 flex-1 sm:flex-none" title="Export to Excel">
                                         <Download size={16} /> Export
                                     </Button>
@@ -535,8 +596,8 @@ export default function StockMovementPage() {
                                                         {new Date(req.movement_datetime).toLocaleString()}
                                                     </TableCell>
                                                     <TableCell>
-                                                        <Badge variant={req.status === 'In Transit' ? 'secondary' : (req.action_type === 'INWARD' ? 'success' : req.action_type === 'TRANSFER' ? 'info' : 'warning')}>
-                                                            {req.status === 'In Transit' ? 'In Transit' : req.action_type}
+                                                        <Badge variant={req.status === 'In Transit' ? 'secondary' : (req.action_type === 'INWARD' ? 'success' : req.action_type === 'TRANSFER' ? 'info' : req.action_type === 'REPACK_OUT' ? 'warning' : 'info')}>
+                                                            {req.status === 'In Transit' ? 'In Transit' : req.action_type.replace('_', ' ')}
                                                         </Badge>
                                                     </TableCell>
                                                     <TableCell>
@@ -708,6 +769,8 @@ export default function StockMovementPage() {
                                             <option value="INWARD">Inward</option>
                                             <option value="TRANSFER">Transfer</option>
                                             <option value="DISPATCH">Dispatch</option>
+                                            <option value="REPACK_OUT">Repack Out</option>
+                                            <option value="REPACK_IN">Repack In</option>
                                         </Select>
 
                                         <Select
@@ -847,7 +910,9 @@ export default function StockMovementPage() {
                                     {movementType === 'INWARD' && <ArrowDownToLine className="text-emerald-500" />}
                                     {movementType === 'TRANSFER' && <ArrowRightLeft className="text-sky-500" />}
                                     {movementType === 'DISPATCH' && <Truck className="text-amber-500" />}
-                                    {isEditMode ? 'Edit ' : ''}{movementType} Request
+                                    {movementType === 'REPACK_OUT' && <Scissors className="text-indigo-500" />}
+                                    {movementType === 'REPACK_IN' && <Layers className="text-purple-500" />}
+                                    {isEditMode ? 'Edit ' : ''}{movementType.replace('_', ' ')} Request
                                 </CardTitle>
                                 <Button onClick={() => setShowModal(false)} variant="ghost" size="icon" className="rounded-full">
                                     <X size={20} />
@@ -860,56 +925,144 @@ export default function StockMovementPage() {
                                         {/* Left Col: Location & Quantity */}
                                         <div className="space-y-4">
                                             {(movementType === 'TRANSFER' || movementType === 'DISPATCH') && (
-                                                <div className="col-span-2 space-y-2">
+                                                <div className="space-y-2">
                                                     <label className="text-sm font-medium">From Store *</label>
                                                     <Select
                                                         value={formData.fromStore}
                                                         onChange={(e) => setFormData({ ...formData, fromStore: e.target.value })}
                                                         required
-                                                        // Restricted users (Managers/Operators) are locked to their assigned stores for OUTWARD/TRANSFER
                                                         disabled={!isGlobalUser}
                                                         className="h-9"
                                                     >
                                                         <option value="">Select store...</option>
-                                                        {/* Use myStores for Source */}
                                                         {myStores.map(s => <option key={s} value={s}>{s}</option>)}
                                                     </Select>
-                                                    {!isGlobalUser && (
-                                                        <p className="text-xs text-muted-foreground">Fixed to your assigned store.</p>
-                                                    )}
                                                 </div>
                                             )}
 
-                                            {/* To Store - DIFFERENT FOR DISPATCH (Input) VS INWARD/TRANSFER (Select) */}
                                             {movementType !== 'DISPATCH' && (movementType === 'INWARD' || movementType === 'TRANSFER') && (
-                                                <div className="col-span-2 space-y-2">
+                                                <div className="space-y-2">
                                                     <label className="text-sm font-medium">To Store *</label>
                                                     <Select
                                                         value={formData.toStore}
                                                         onChange={(e) => setFormData({ ...formData, toStore: e.target.value })}
                                                         required
-                                                        // For INWARD: Restricted to myStores.
-                                                        // For TRANSFER: Open to allStores.
                                                         disabled={movementType === 'INWARD' && !isGlobalUser}
                                                         className="h-9"
                                                     >
                                                         <option value="">Select store...</option>
-                                                        {/* If Inward, use myStores. If Transfer, use allStores */}
                                                         {(movementType === 'INWARD' ? myStores : allStores).map(s => (
                                                             <option key={s} value={s}>{s}</option>
                                                         ))}
                                                     </Select>
-                                                    {movementType === 'INWARD' && !isGlobalUser && (
-                                                        <p className="text-xs text-muted-foreground">You can only receive into your assigned store.</p>
+                                                </div>
+                                            )}
+
+                                            {movementType === 'REPACK_OUT' && (
+                                                <div className="space-y-4">
+                                                    <div className="space-y-2">
+                                                        <label className="text-sm font-medium">Select Allocated PO *</label>
+                                                        <Select
+                                                            value={selectedPO}
+                                                            onChange={(e) => handlePOChange(e.target.value)}
+                                                            className="h-9"
+                                                            required
+                                                        >
+                                                            <option value="">Select PO...</option>
+                                                            {activePOs.map(po => (
+                                                                <option key={po.id} value={po.id}>{po.po_number} - {po.customer}</option>
+                                                            ))}
+                                                        </Select>
+                                                    </div>
+
+                                                    {selectedPO && (
+                                                        <div className="space-y-2 animate-in fade-in slide-in-from-top-1">
+                                                            <label className="text-sm font-medium">Select Line Item *</label>
+                                                            <Select
+                                                                value={selectedLineItem}
+                                                                onChange={(e) => {
+                                                                    const liId = e.target.value;
+                                                                    setSelectedLineItem(liId);
+                                                                    const li = poLineItems.find(item => item.id.toString() === liId);
+                                                                    if (li) {
+                                                                        setFormData(prev => ({
+                                                                            ...prev,
+                                                                            type: li.type,
+                                                                            variety: li.variety,
+                                                                            grade: li.grade
+                                                                        }));
+                                                                        fetchAllocatedStock(li.po_id, li.id);
+                                                                    }
+                                                                }}
+                                                                className="h-9"
+                                                                required
+                                                            >
+                                                                <option value="">Select Item...</option>
+                                                                {poLineItems.map(item => (
+                                                                    <option key={item.id} value={item.id}>
+                                                                        {item.variety} ({item.grade}) - Ordered: {item.ordered_qty} MCs
+                                                                    </option>
+                                                                ))}
+                                                            </Select>
+                                                        </div>
+                                                    )}
+
+                                                    {selectedLineItem && (
+                                                        <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                                                            <label className="text-sm font-medium">To Store (Fixed)</label>
+                                                            <Input value="Production (Repacking)" readOnly className="bg-muted h-9" />
+                                                        </div>
                                                     )}
                                                 </div>
                                             )}
 
-                                            {/* To Store - DISPATCH (Compact) */}
+                                            {movementType === 'REPACK_IN' && (
+                                                <div className="space-y-4">
+                                                    <div className="space-y-2">
+                                                        <label className="text-sm font-medium">Original MCs (In Repacking) *</label>
+                                                        <div className="border rounded-md p-2 max-h-[120px] overflow-y-auto bg-muted/20">
+                                                            {inRepackingStock.length === 0 ? (
+                                                                <p className="text-xs text-center py-4 text-muted-foreground">No stock currently "In Repacking"</p>
+                                                            ) : (
+                                                                <div className="space-y-1">
+                                                                    {inRepackingStock.map(stock => (
+                                                                        <label key={stock.id} className="flex items-center gap-2 p-1 hover:bg-background rounded cursor-pointer text-xs">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                className="rounded border-gray-300"
+                                                                                checked={(formData as any).originalMcNumbers?.includes(stock.mc_number)}
+                                                                                onChange={(e) => {
+                                                                                    const current = (formData as any).originalMcNumbers || [];
+                                                                                    const updated = e.target.checked
+                                                                                        ? [...current, stock.mc_number]
+                                                                                        : current.filter((m: string) => m !== stock.mc_number);
+                                                                                    
+                                                                                    setFormData({ ...formData, originalMcNumbers: updated } as any);
+                                                                                    if (e.target.checked && updated.length === 1) {
+                                                                                        setFormData(prev => ({
+                                                                                            ...prev,
+                                                                                            originalMcNumbers: updated,
+                                                                                            type: stock.type,
+                                                                                            variety: stock.variety,
+                                                                                            grade: stock.grade
+                                                                                        }) as any);
+                                                                                    }
+                                                                                }}
+                                                                            />
+                                                                            <span className="font-mono">{stock.mc_number}</span>
+                                                                            <span className="text-muted-foreground">{stock.variety} ({stock.grade})</span>
+                                                                        </label>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+
                                             {movementType === 'DISPATCH' && (
-                                                <div className="col-span-2 space-y-3 border p-3 rounded-lg bg-orange-50/50 border-orange-100">
+                                                <div className="space-y-3 border p-3 rounded-lg bg-orange-50/50 border-orange-100">
                                                     <div className="flex flex-col sm:flex-row gap-4 items-start">
-                                                        {/* Purpose */}
                                                         <div className="space-y-1 w-full sm:w-[180px] shrink-0">
                                                             <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Purpose</label>
                                                             <div className="flex flex-col gap-2 mt-1">
@@ -942,7 +1095,6 @@ export default function StockMovementPage() {
                                                             </div>
                                                         </div>
 
-                                                        {/* Target logic */}
                                                         <div className="space-y-2 flex-1">
                                                             {dispatchPurpose === 'SALE' && (
                                                                 <div className="space-y-1 animate-in fade-in slide-in-from-top-1">
@@ -961,14 +1113,11 @@ export default function StockMovementPage() {
                                                                     >
                                                                         <option value="">Select PO...</option>
                                                                         {activePOs.map(po => (
-                                                                            <option key={po.id} value={po.id}>
-                                                                                {po.po_number} - {po.customer}
-                                                                            </option>
+                                                                            <option key={po.id} value={po.id}>{po.po_number} - {po.customer}</option>
                                                                         ))}
                                                                     </Select>
                                                                 </div>
                                                             )}
-
                                                             <div className="space-y-1">
                                                                 <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                                                     {dispatchPurpose === 'SALE' ? 'Client / Dest.' : 'Destination'}
@@ -986,77 +1135,98 @@ export default function StockMovementPage() {
                                                     </div>
                                                 </div>
                                             )}
-
                                         </div>
 
                                         {/* Right Col: Attributes & Scan */}
                                         <div className="space-y-4">
-                                            {/* Attributes Grid */}
-                                            <div className="grid grid-cols-2 sm:grid-cols-2 gap-3 p-3 border rounded-lg bg-muted/10">
-                                                <div className="space-y-1">
-                                                    <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Type</label>
-                                                    <Select
-                                                        value={formData.type}
-                                                        onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                                                        required
-                                                        className="h-9 text-xs"
-                                                    >
-                                                        <option value="">Type...</option>
-                                                        {masterData?.types.map(t => <option key={t} value={t}>{t}</option>)}
-                                                    </Select>
+                                            {movementType !== 'REPACK_OUT' && movementType !== 'REPACK_IN' && (
+                                                <div className="grid grid-cols-2 gap-3 p-3 border rounded-lg bg-muted/10">
+                                                    <div className="space-y-1">
+                                                        <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Type</label>
+                                                        <Select
+                                                            value={formData.type}
+                                                            onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+                                                            required
+                                                            className="h-9 text-xs"
+                                                        >
+                                                            <option value="">Type...</option>
+                                                            {masterData?.types.map(t => <option key={t} value={t}>{t}</option>)}
+                                                        </Select>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Variety</label>
+                                                        <Select
+                                                            value={formData.variety}
+                                                            onChange={(e) => setFormData({ ...formData, variety: e.target.value })}
+                                                            required
+                                                            className="h-9 text-xs"
+                                                        >
+                                                            <option value="">Variety...</option>
+                                                            {masterData?.varieties.map(v => <option key={v} value={v}>{v}</option>)}
+                                                        </Select>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Packing</label>
+                                                        <Select
+                                                            value={formData.packing}
+                                                            onChange={(e) => setFormData({ ...formData, packing: e.target.value })}
+                                                            required
+                                                            className="h-9 text-xs"
+                                                        >
+                                                            <option value="">Packing...</option>
+                                                            {masterData?.packings.map(p => <option key={p} value={p}>{p}</option>)}
+                                                        </Select>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Grade</label>
+                                                        <Select
+                                                            value={formData.grade}
+                                                            onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
+                                                            required
+                                                            className="h-9 text-xs"
+                                                        >
+                                                            <option value="">Grade...</option>
+                                                            {masterData?.grades.map(g => <option key={g} value={g}>{g}</option>)}
+                                                        </Select>
+                                                    </div>
                                                 </div>
+                                            )}
 
-                                                <div className="space-y-1">
-                                                    <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Variety</label>
-                                                    <Select
-                                                        value={formData.variety}
-                                                        onChange={(e) => setFormData({ ...formData, variety: e.target.value })}
-                                                        required
-                                                        className="h-9 text-xs"
-                                                    >
-                                                        <option value="">Variety...</option>
-                                                        {masterData?.varieties.map(v => <option key={v} value={v}>{v}</option>)}
-                                                    </Select>
+                                            {movementType === 'REPACK_IN' && (
+                                                <div className="p-3 border rounded-lg bg-purple-50/30 border-purple-100 space-y-3">
+                                                    <div className="grid grid-cols-2 gap-3">
+                                                        <div className="space-y-1">
+                                                            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Type</label>
+                                                            <Input value={formData.type} readOnly className="h-8 bg-muted text-xs" />
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Variety</label>
+                                                            <Input value={formData.variety} readOnly className="h-8 bg-muted text-xs" />
+                                                        </div>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-xs font-semibold uppercase tracking-wider text-purple-700">New Packing Label *</label>
+                                                        <Select
+                                                            value={formData.packing}
+                                                            onChange={(e) => setFormData({ ...formData, packing: e.target.value })}
+                                                            required
+                                                            className="h-9 text-xs border-purple-200"
+                                                        >
+                                                            <option value="">Packing...</option>
+                                                            {masterData?.packings.map(p => <option key={p} value={p}>{p}</option>)}
+                                                        </Select>
+                                                    </div>
                                                 </div>
+                                            )}
 
-                                                <div className="space-y-1">
-                                                    <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Packing</label>
-                                                    <Select
-                                                        value={formData.packing}
-                                                        onChange={(e) => setFormData({ ...formData, packing: e.target.value })}
-                                                        required
-                                                        className="h-9 text-xs"
-                                                    >
-                                                        <option value="">Packing...</option>
-                                                        {masterData?.packings.map(p => <option key={p} value={p}>{p}</option>)}
-                                                    </Select>
-                                                </div>
-
-                                                <div className="space-y-1">
-                                                    <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Grade</label>
-                                                    <Select
-                                                        value={formData.grade}
-                                                        onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
-                                                        required
-                                                        className="h-9 text-xs"
-                                                    >
-                                                        <option value="">Grade...</option>
-                                                        {masterData?.grades.map(g => <option key={g} value={g}>{g}</option>)}
-                                                    </Select>
-                                                </div>
-                                            </div>
-
-                                            {/* Scan Toggle */}
-                                            {/* Strictly controlled by system setting */}
                                             {settings['enable_barcode_scan'] === 'true' && (
-                                                <div className="flex items-center gap-3 p-3 bg-muted/40 border border-border/40 rounded-lg">
+                                                <div className="flex items-center gap-3 p-3 bg-muted/40 border rounded-lg">
                                                     <Button
                                                         type="button"
                                                         onClick={() => {
                                                             setIsScanMode(!isScanMode);
                                                             setScannedMCs([]);
-                                                            if (!isScanMode) setFormData(prev => ({ ...prev, qty: '0' }));
-                                                            else setFormData(prev => ({ ...prev, qty: '' }));
+                                                            setFormData(prev => ({ ...prev, qty: !isScanMode ? '0' : '' }));
                                                         }}
                                                         variant={isScanMode ? "default" : "secondary"}
                                                         size="icon"
@@ -1067,13 +1237,13 @@ export default function StockMovementPage() {
                                                     <div>
                                                         <div className="font-medium text-sm">Barcode Scan Mode</div>
                                                         <div className="text-xs text-muted-foreground">
-                                                            {movementType === 'INWARD' ? 'Scan vendor barcodes' : (isScanMode ? 'Scan individual MCs to select' : 'Auto FIFO selection')}
+                                                            {isScanMode ? 'Scan individual MCs to select' : 'Auto FIFO selection'}
                                                         </div>
                                                     </div>
                                                 </div>
                                             )}
 
-                                            {!isScanMode && (
+                                            {!isScanMode && movementType !== 'REPACK_IN' && (
                                                 <div className="space-y-2">
                                                     <label className="text-sm font-medium">Quantity (MCs) *</label>
                                                     <Input
@@ -1082,20 +1252,16 @@ export default function StockMovementPage() {
                                                         onChange={(e) => setFormData({ ...formData, qty: e.target.value })}
                                                         min="1"
                                                         required
-                                                        readOnly={isScanMode} // Read-only in scan mode
-                                                        className={isScanMode ? "bg-muted cursor-not-allowed font-bold" : ""}
+                                                        className="h-9"
                                                     />
                                                 </div>
                                             )}
 
-                                            {/* Scan UI - NO NESTED FORM */}
                                             {isScanMode && (
-                                                <div className="border border-border/40 rounded-xl p-3 bg-muted/20 flex flex-col h-[200px]">
+                                                <div className="border rounded-xl p-3 bg-muted/20 flex flex-col h-[200px]">
                                                     <h4 className="font-semibold text-xs mb-2 flex items-center gap-2">
-                                                        <ScanBarcode size={14} />
-                                                        Scanned ({scannedMCs.length})
+                                                        <ScanBarcode size={14} /> Scanned ({scannedMCs.length})
                                                     </h4>
-
                                                     <div className="flex gap-2 mb-2">
                                                         <Input
                                                             ref={barcodeInputRef}
@@ -1111,27 +1277,13 @@ export default function StockMovementPage() {
                                                             placeholder="Scan..."
                                                             className="flex-1 bg-background h-9 text-xs"
                                                         />
-                                                        <Button
-                                                            type="button"
-                                                            size="sm"
-                                                            onClick={(e) => handleBarcodeSubmit(e as any)}
-                                                            variant="secondary"
-                                                        >
-                                                            Add
-                                                        </Button>
+                                                        <Button type="button" size="sm" onClick={(e) => handleBarcodeSubmit(e as any)} variant="secondary">Add</Button>
                                                     </div>
-
-                                                    <div className="flex-1 overflow-y-auto bg-background/50 border border-border/40 rounded lg p-2 space-y-1">
+                                                    <div className="flex-1 overflow-y-auto bg-background/50 border rounded p-2 space-y-1">
                                                         {scannedMCs.map((mc, idx) => (
-                                                            <div key={idx} className="flex items-center justify-between p-1 px-2 bg-card rounded text-xs hover:bg-accent/50 border border-border/20">
+                                                            <div key={idx} className="flex items-center justify-between p-1 px-2 bg-card rounded text-xs border">
                                                                 <span className="font-mono">{mc}</span>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => removeScannedMC(mc)}
-                                                                    className="text-muted-foreground hover:text-destructive"
-                                                                >
-                                                                    <Trash size={12} />
-                                                                </button>
+                                                                <button type="button" onClick={() => removeScannedMC(mc)} className="text-muted-foreground hover:text-destructive"><Trash size={12} /></button>
                                                             </div>
                                                         ))}
                                                     </div>
@@ -1140,8 +1292,6 @@ export default function StockMovementPage() {
                                         </div>
                                     </div>
                                 </form>
-
-
 
                                 <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-border/40">
                                     <Button type="button" onClick={() => setShowModal(false)} variant="secondary">
