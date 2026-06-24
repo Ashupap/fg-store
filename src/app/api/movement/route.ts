@@ -213,19 +213,19 @@ async function createPendingRequest(data: any, userId: number, actionType: strin
     else return { success: false, error: 'Invalid action type' };
 
     if (!validation.success) {
-        const error = validation.error as any;
-        return { success: false, error: error.errors[0].message };
+        const error = validation.error;
+        return { success: false, error: error.issues[0].message };
     }
 
-    const valData = validation.data;
-    const { type, variety, packing, grade, qty } = valData;
-    const fromStore = (valData as any).fromStore || null;
+    const valData = validation.data as any;
+    const { type = null, variety = null, packing = null, grade = null, qty = 0 } = valData;
+    const fromStore = valData.fromStore || null;
     // For Dispatch, 'toStore' is client name. For Inward, it's valid store.
-    const toStore = (valData as any).toStore || null;
-    const remarks = (valData as any).remarks || null;
-    const dispatchPurpose = (valData as any).dispatchPurpose || null;
-    const poId = (valData as any).poId || null;
-
+    const toStore = valData.toStore || null;
+    const remarks = valData.remarks || null;
+    const dispatchPurpose = valData.dispatchPurpose || null;
+    const poId = valData.poId || null;
+    const allocationStrategy = valData.allocationStrategy || 'FIFO';
 
     try {
         const insertLog = db.prepare(`
@@ -234,9 +234,9 @@ async function createPendingRequest(data: any, userId: number, actionType: strin
                 from_location, to_location, 
                 type, variety, packing, grade, 
                 qty_mcs, mc_numbers, moved_by_id, remarks, status,
-                dispatch_purpose, po_id
+                dispatch_purpose, po_id, allocation_strategy
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending Approval', ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending Approval', ?, ?, ?)
         `);
 
         // If specific MCs are requested, save them in the log temporarily as 'Requested:...' or just directly if preferred.
@@ -259,7 +259,8 @@ async function createPendingRequest(data: any, userId: number, actionType: strin
             userId,
             remarks,
             dispatchPurpose,
-            poId
+            poId,
+            allocationStrategy
         );
 
         return {

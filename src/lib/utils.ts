@@ -66,3 +66,54 @@ export function formatNumber(num: number): string {
 export function packingToCode(packing: string): string {
     return packing.replace(/\s+/g, '').toUpperCase();
 }
+
+// Format date to dd-mm-yyyy for display
+export function formatDisplayDate(dateInput: Date | string | null | undefined): string {
+    if (!dateInput) return 'N/A';
+    if (dateInput instanceof Date) {
+        const day = String(dateInput.getDate()).padStart(2, '0');
+        const month = String(dateInput.getMonth() + 1).padStart(2, '0');
+        const year = dateInput.getFullYear();
+        return `${day}-${month}-${year}`;
+    }
+    const dateStr = String(dateInput).trim();
+    // Check if it's already dd-mm-yyyy
+    if (/^\d{2}-\d{2}-\d{4}$/.test(dateStr)) {
+        return dateStr;
+    }
+    // Check if it's yyyy-mm-dd (possibly followed by time/T)
+    const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s]|$)/);
+    if (match) {
+        const [_, year, month, day] = match;
+        return `${day}-${month}-${year}`;
+    }
+    // Fallback to standard Date parsing if not matching YYYY-MM-DD pattern
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    // Format UTC if it was an ISO date string to prevent local timezone shifts
+    if (dateStr.includes('T') || /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        const day = String(d.getUTCDate()).padStart(2, '0');
+        const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const year = d.getUTCFullYear();
+        return `${day}-${month}-${year}`;
+    } else {
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${day}-${month}-${year}`;
+    }
+}
+
+// Format date and time to dd-mm-yyyy hh:mm:ss for display
+export function formatDisplayDateTime(dateInput: Date | string | null | undefined): string {
+    if (!dateInput) return 'N/A';
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return String(dateInput);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const seconds = String(d.getSeconds()).padStart(2, '0');
+    return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+}

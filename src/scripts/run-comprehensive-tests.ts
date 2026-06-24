@@ -163,6 +163,27 @@ async function runTests() {
         if (result.success) {
             console.log(`✅ Transfer Successful. Moved ${result.movedCount} MCs.`);
 
+            // Simulate the Acceptance step to move the stock from 'In Transit' to the destination store
+            const movement = db.prepare('SELECT mc_numbers FROM stock_movement_log WHERE movement_id = ?').get(result.moveId) as { mc_numbers: string };
+            const mcNumbers = movement.mc_numbers.split(',');
+            const updateStock = db.prepare(`
+                UPDATE fg_stock_master
+                SET cold_store = ?, status = 'Available', updated_at = CURRENT_TIMESTAMP
+                WHERE mc_number = ?
+            `);
+            const updateMovement = db.prepare(`
+                UPDATE stock_movement_log
+                SET status = 'Completed', approved_by_id = ?
+                WHERE movement_id = ?
+            `);
+            
+            db.transaction(() => {
+                for (const mc of mcNumbers) {
+                    updateStock.run('TestStore_B', mc);
+                }
+                updateMovement.run(multiId, result.moveId);
+            })();
+
             // Verify Source of moved MCs
             // We check the 'packing_date' of the moved items in 'TestStore_B'
             const movedStock = db.prepare(`

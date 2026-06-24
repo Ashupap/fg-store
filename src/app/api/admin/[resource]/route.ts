@@ -8,7 +8,7 @@ const configSchema = z.object({
     mcs_per_fcl: z.string().transform(v => parseInt(v)).or(z.number()).optional(),
 });
 
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, hasPermission } from '@/lib/auth';
 
 export async function GET(
     request: NextRequest,
@@ -17,7 +17,7 @@ export async function GET(
     try {
         const user = await getCurrentUser();
         // Allow Admin and General Manager
-        if (!user || (user.role !== 'admin' && user.role !== 'general_manager')) {
+        if (!user || !hasPermission(user, 'master:manage')) {
             return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
         }
 
@@ -80,7 +80,7 @@ export async function POST(
 ) {
     try {
         const user = await getCurrentUser();
-        if (!user || (user.role !== 'admin' && user.role !== 'general_manager')) {
+        if (!user || !hasPermission(user, 'master:manage')) {
             return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
         }
 
@@ -137,7 +137,7 @@ export async function DELETE(
 ) {
     try {
         const user = await getCurrentUser();
-        if (!user || (user.role !== 'admin' && user.role !== 'general_manager')) {
+        if (!user || !hasPermission(user, 'master:manage')) {
             return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
         }
 
@@ -185,7 +185,7 @@ export async function PUT(
 ) {
     try {
         const user = await getCurrentUser();
-        if (!user || (user.role !== 'admin' && user.role !== 'general_manager')) {
+        if (!user || !hasPermission(user, 'master:manage')) {
             return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
         }
 

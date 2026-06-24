@@ -16,6 +16,7 @@ export const inwardMovementSchema = z.object({
     qty: z.number().int().positive('Quantity must be a positive number'),
     remarks: z.string().nullish(),
     barcodes: z.array(z.string()).optional(),
+    packingDate: z.string().optional(), // Optional custom packing date for simulation tests / bulk import backdating
 });
 
 // Transfer movement validation
@@ -28,6 +29,7 @@ export const transferMovementSchema = z.object({
     grade: z.string().min(1, 'Grade is required'),
     qty: z.number().int().positive('Quantity must be a positive number'),
     remarks: z.string().nullish(),
+    allocationStrategy: z.enum(['FIFO', 'LIFO']).optional().default('FIFO'),
 }).refine(data => data.fromStore !== data.toStore, {
     message: 'From Store and To Store must be different',
     path: ['toStore'],
@@ -37,14 +39,14 @@ export const transferMovementSchema = z.object({
 export const dispatchMovementSchema = z.object({
     fromStore: z.string().min(1, 'From Store is required'),
     toStore: z.string().min(1, 'Client/Destination is required'), // Client Name or "Repacking"
-    type: z.string().min(1, 'Type is required'),
-    variety: z.string().min(1, 'Variety is required'),
-    packing: z.string().min(1, 'Packing is required'),
-    grade: z.string().min(1, 'Grade is required'),
+    type: z.string().optional(),
+    variety: z.string().optional(),
+    packing: z.string().optional(),
+    grade: z.string().optional(),
     qty: z.number().int().positive('Quantity must be a positive number'),
     remarks: z.string().nullish(),
-    dispatchPurpose: z.enum(['SALE', 'REPACKING']).nullish(), // New field
-    poId: z.number().nullish(), // Linked PO ID (for Sale)
+    dispatchPurpose: z.enum(['SALE', 'REPACKING']).optional().default('SALE'), // New field
+    poId: z.number(), // Linked PO ID (for Sale)
 });
 
 // Repacking Start validation
@@ -95,6 +97,8 @@ export const poLineItemSchema = z.object({
 export const createPOSchema = z.object({
     poNumber: z.string().min(1, 'PO Number is required'),
     orderDate: z.string().min(1, 'Order Date is required'),
+    brandingType: z.enum(['Demo', 'Branded']).optional().default('Demo'),
+    loadingStore: z.string().optional(),
     lineItems: z.array(poLineItemSchema).min(1, 'At least one line item is required'),
 });
 

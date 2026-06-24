@@ -47,8 +47,17 @@ export async function GET(request: NextRequest) {
                     pendingRequests = [];
                 } else {
                     const placeholders = assignedStores.map(() => '?').join(',');
-                    // Params: [assigned...] for Pending (From/To), [assigned...] for In Transit (To only)
-                    const params = [...assignedStores, ...assignedStores, ...assignedStores];
+                    // Params: 
+                    // 1. from_location for Pending
+                    // 2. to_location for Pending
+                    // 3. to_location for In Transit
+                    // 4. from_location for In Transit (to rented stores)
+                    const params = [
+                        ...assignedStores, 
+                        ...assignedStores, 
+                        ...assignedStores, 
+                        ...assignedStores
+                    ];
 
                     pendingRequests = db.prepare(`
                         SELECT 
@@ -56,6 +65,7 @@ export async function GET(request: NextRequest) {
                             u.name as moved_by_name
                         FROM stock_movement_log sml
                         LEFT JOIN users u ON sml.moved_by_id = u.id
+                        LEFT JOIN stores ts ON sml.to_location = ts.name
                         WHERE 
                         (
                             sml.status = 'Pending Approval'
@@ -68,7 +78,14 @@ export async function GET(request: NextRequest) {
                         OR
                         (
                             sml.status = 'In Transit'
-                            AND sml.to_location IN (${placeholders})
+                            AND (
+                                sml.to_location IN (${placeholders})
+                                OR
+                                (
+                                    ts.type = 'Rented'
+                                    AND sml.from_location IN (${placeholders})
+                                )
+                            )
                         )
                         ORDER BY sml.movement_datetime DESC
                      `).all(...params);

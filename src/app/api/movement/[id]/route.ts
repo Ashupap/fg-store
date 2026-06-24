@@ -25,13 +25,25 @@ export async function GET(
             LEFT JOIN users u1 ON sml.moved_by_id = u1.id
             LEFT JOIN users u2 ON sml.approved_by_id = u2.id
             WHERE sml.movement_id = ?
-        `).get(id);
+        `).get(id) as any;
 
         if (!movement) {
             return NextResponse.json({ success: false, error: 'Movement not found' }, { status: 404 });
         }
 
-        return NextResponse.json({ success: true, data: movement });
+        let cartons: any[] = [];
+        if (movement.mc_numbers) {
+            const mcList = movement.mc_numbers.split(',').map((mc: string) => mc.trim());
+            const placeholders = mcList.map(() => '?').join(',');
+            cartons = db.prepare(`
+                SELECT f.mc_number, f.short_code, f.barcode, f.grade, f.variety, f.type, f.packing_code, f.status, f.section_id, s.name as section_name
+                FROM fg_stock_master f
+                LEFT JOIN store_sections s ON f.section_id = s.id
+                WHERE f.mc_number IN (${placeholders})
+            `).all(...mcList);
+        }
+
+        return NextResponse.json({ success: true, data: { ...movement, cartons } });
     } catch (error) {
         console.error('Fetch movement error:', error);
         return NextResponse.json({ success: false, error: 'Failed to fetch movement' }, { status: 500 });
@@ -94,6 +106,7 @@ export async function PUT(
         const validData = validation.data;
         const { variety, packing, grade, qty } = validData;
         const remarks = (validData as any).remarks || null;
+        const allocationStrategy = (validData as any).allocationStrategy || 'FIFO';
         // Extract locations
         const fromLoc = (validData as any).fromStore || null;
         const toLoc = (validData as any).toStore || null;
@@ -108,11 +121,12 @@ export async function PUT(
                 qty_mcs = ?,
                 from_location = ?,
                 to_location = ?,
-                remarks = ?
+                remarks = ?,
+                allocation_strategy = ?
             WHERE movement_id = ?
         `);
 
-        updateStmt.run(variety, packing, grade, qty, fromLoc, toLoc, remarks, id);
+        updateStmt.run(variety, packing, grade, qty, fromLoc, toLoc, remarks, allocationStrategy, id);
 
         return NextResponse.json({ success: true, message: 'Request updated successfully' });
 

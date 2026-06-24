@@ -61,7 +61,8 @@ export async function POST(
             qty: log.qty_mcs,
             remarks: log.remarks,
             dispatchPurpose: log.dispatch_purpose,
-            poId: log.po_id
+            poId: log.po_id,
+            allocationStrategy: log.allocation_strategy,
         };
 
         // If specific MCs were requested, they are stored in log.mc_numbers

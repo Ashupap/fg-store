@@ -1,7 +1,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, hasPermission } from '@/lib/auth';
 import { z } from 'zod';
 
 const createStoreSchema = z.object({
@@ -17,7 +17,7 @@ const createStoreSchema = z.object({
 export async function GET(request: NextRequest) {
     try {
         const user = await getCurrentUser();
-        if (!user || (user.role !== 'admin' && user.role !== 'general_manager')) {
+        if (!user || !hasPermission(user, 'master:manage')) {
             return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
         }
 
@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
     try {
         const user = await getCurrentUser();
-        if (!user || (user.role !== 'admin' && user.role !== 'general_manager')) {
+        if (!user || !hasPermission(user, 'master:manage')) {
             return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
         }
 

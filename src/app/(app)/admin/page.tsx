@@ -28,6 +28,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select } from '@/components/ui/select';
+import { formatDisplayDate, formatDisplayDateTime } from '@/lib/utils';
 
 interface MasterData {
     id: number;
@@ -56,12 +57,13 @@ interface UserData {
 }
 
 const TABS = [
-    { id: 'varieties', label: 'Varieties', icon: Package, description: 'Manage fruit varieties' },
+    { id: 'varieties', label: 'Varieties', icon: Package, description: 'Manage varieties' },
     { id: 'packings', label: 'Packings', icon: Boxes, description: 'Manage packing types' },
     { id: 'grades', label: 'Grades', icon: Tag, description: 'Manage quality grades' },
     { id: 'types', label: 'Types', icon: Grid, description: 'Manage product types' },
 
     { id: 'stores', label: 'Stores', icon: ThermometerSnowflake, description: 'Manage processing units and cold stores' },
+    { id: 'sections', label: 'Store Sections', icon: Grid, description: 'Manage store storage sections and capacities' },
     { id: 'users', label: 'Users', icon: User, description: 'Manage user access and store assignments' },
     { id: 'roles', label: 'Roles', icon: Shield, description: 'Configure custom roles and permissions' },
     { id: 'configuration', label: 'System Config', icon: Settings, description: 'Global application settings' },
@@ -104,6 +106,8 @@ export default function AdminPage() {
     const [roles, setRoles] = useState<any[]>([]);
     const [roleForm, setRoleForm] = useState({ name: '' });
     const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
+    const [sections, setSections] = useState<any[]>([]);
+    const [sectionForm, setSectionForm] = useState({ storeName: '', name: '', capacityMcs: 500 });
 
     // Modal state
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -270,6 +274,18 @@ export default function AdminPage() {
                 } else {
                     setToast({ type: 'error', message: result.error });
                 }
+            } else if (activeTab === 'sections') {
+                const [sectionsRes, storesRes] = await Promise.all([
+                    fetch('/api/admin/sections'),
+                    fetch('/api/admin/stores')
+                ]);
+                const sectionsResult = await sectionsRes.json();
+                const storesResult = await storesRes.json();
+
+                if (sectionsResult.success) setSections(sectionsResult.data);
+                if (storesResult.success) setStores(storesResult.data);
+
+                if (!sectionsResult.success) setToast({ type: 'error', message: sectionsResult.error });
             } else if (activeTab === 'audit-logs') {
                 const response = await fetch('/api/admin/audit-logs');
                 const result = await response.json();
@@ -365,6 +381,28 @@ export default function AdminPage() {
                 return;
             }
 
+            if (activeTab === 'sections') {
+                const sectionBody = modalMode === 'create'
+                    ? sectionForm
+                    : { ...sectionForm, id: (currentItem as any).id };
+
+                const sectionResponse = await fetch('/api/admin/sections', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(sectionBody),
+                });
+
+                const sectionResult = await sectionResponse.json();
+                if (sectionResult.success) {
+                    setIsModalOpen(false);
+                    fetchData();
+                    setToast({ type: 'success', message: 'Section saved successfully' });
+                } else {
+                    setToast({ type: 'error', message: sectionResult.error });
+                }
+                return;
+            }
+
             if (activeTab === 'users') {
                 const isCreate = modalMode === 'create';
                 const url = isCreate
@@ -420,6 +458,8 @@ export default function AdminPage() {
         try {
             const url = activeTab === 'roles'
                 ? `/api/admin/roles?id=${value}`
+                : activeTab === 'sections'
+                ? `/api/admin/sections?id=${value}`
                 : `/api/admin/${activeTab}${activeTab === 'stores' ? '/' + (value as any) : '?value=' + encodeURIComponent(value)}`;
             const response = await fetch(url, {
                 method: 'DELETE',
@@ -446,6 +486,8 @@ export default function AdminPage() {
         } else if (activeTab === 'roles') {
             setRoleForm({ name: '' });
             setSelectedPermissions([]);
+        } else if (activeTab === 'sections') {
+            setSectionForm({ storeName: stores[0]?.name || '', name: '', capacityMcs: 500 });
         } else {
             setFormData({ value: '', mcs_per_fcl: '100' });
         }
@@ -481,6 +523,13 @@ export default function AdminPage() {
             const role = item as any;
             setRoleForm({ name: role.name });
             setSelectedPermissions(role.permissions || []);
+        } else if (activeTab === 'sections') {
+            const sec = item as any;
+            setSectionForm({
+                storeName: sec.storeName,
+                name: sec.name,
+                capacityMcs: sec.capacityMcs
+            });
         } else {
             const md = item as MasterData;
             setFormData({
@@ -511,16 +560,18 @@ export default function AdminPage() {
 
             <div className="max-w-7xl mx-auto flex flex-col md:flex-row gap-8">
 
-                    {/* Sidebar Tabs */}
                     <Card className="w-full md:w-64 h-fit border-border/50 bg-card/40 md:sticky md:top-24">
                         <CardContent className="p-3 flex flex-row md:flex-col gap-1 overflow-x-auto md:overflow-visible scrollbar-none">
                             {TABS.map(tab => {
+                                if (tab.id === 'sections' && settings['enable_location_mapping'] !== 'true') return null;
+
                                 // Permission-Based Tab Rendering
                                 const isAdmin = currentUserRole === 'admin';
                                 if (!isAdmin) {
                                     if (tab.id === 'users' && !currentUserPermissions.includes('users:manage') && !currentUserPermissions.includes('*')) return null;
                                     if (tab.id === 'configuration' && !currentUserPermissions.includes('settings:manage') && !currentUserPermissions.includes('*')) return null;
                                     if (tab.id === 'stores' && !currentUserPermissions.includes('master:manage') && !currentUserPermissions.includes('*')) return null;
+                                    if (tab.id === 'sections' && !currentUserPermissions.includes('master:manage') && !currentUserPermissions.includes('*')) return null;
                                     if (['varieties', 'packings', 'grades', 'types'].includes(tab.id) && !currentUserPermissions.includes('master:manage') && !currentUserPermissions.includes('*')) return null;
                                     if (tab.id === 'audit-logs' && currentUserRole !== 'general_manager') return null;
                                     if (tab.id === 'roles') return null;
@@ -590,6 +641,18 @@ export default function AdminPage() {
                                         <Switch
                                             checked={settings['enable_container_planning'] === 'true'}
                                             onCheckedChange={() => toggleSetting('enable_container_planning', settings['enable_container_planning'])}
+                                        />
+                                    </CardContent>
+                                </Card>
+                                <Card className="border-border/50 bg-card/40">
+                                    <CardContent className="p-6 flex items-center justify-between gap-4">
+                                        <div className="space-y-1">
+                                            <h3 className="font-medium text-16">Enable Store Location Mapping</h3>
+                                            <p className="text-sm text-muted-foreground">Divide cold stores into physical sections with capacity tracking and a live interactive layout grid.</p>
+                                        </div>
+                                        <Switch
+                                            checked={settings['enable_location_mapping'] === 'true'}
+                                            onCheckedChange={() => toggleSetting('enable_location_mapping', settings['enable_location_mapping'])}
                                         />
                                     </CardContent>
                                 </Card>
@@ -684,7 +747,7 @@ export default function AdminPage() {
                                             {auditLogs.map((log) => (
                                                 <TableRow key={log.id} className="hover:bg-muted/10">
                                                     <TableCell className="font-medium whitespace-nowrap text-xs">
-                                                        {new Date(log.timestamp).toLocaleString()}
+                                                        {formatDisplayDateTime(log.timestamp)}
                                                     </TableCell>
                                                     <TableCell>
                                                         <Badge variant="outline" className="text-xs uppercase bg-indigo-500/10 text-indigo-600 border-indigo-500/20">
@@ -726,7 +789,14 @@ export default function AdminPage() {
                                     <Table>
                                         <TableHeader>
                                             <TableRow className="bg-secondary/50 hover:bg-secondary/60">
-                                                {activeTab === 'stores' ? (
+                                                {activeTab === 'sections' ? (
+                                                    <>
+                                                        <TableHead>Store Name</TableHead>
+                                                        <TableHead>Section Name</TableHead>
+                                                        <TableHead>Occupied Space</TableHead>
+                                                        <TableHead>Total Capacity</TableHead>
+                                                    </>
+                                                ) : activeTab === 'stores' ? (
                                                     <>
                                                         <TableHead>Store Name</TableHead>
                                                         <TableHead>Type</TableHead>
@@ -751,8 +821,38 @@ export default function AdminPage() {
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
-                                            {activeTab === 'stores'
-                                                ? stores.map((store) => (
+                                            {activeTab === 'sections'
+                                                ? sections.map((sec) => (
+                                                    <TableRow key={sec.id} className="hover:bg-muted/10">
+                                                        <TableCell className="font-semibold text-sm">{sec.storeName}</TableCell>
+                                                        <TableCell className="font-medium text-sm">{sec.name}</TableCell>
+                                                        <TableCell>
+                                                            <div className="flex items-center gap-2">
+                                                                <Badge className={
+                                                                    sec.occupied >= sec.capacityMcs ? 'bg-rose-500/10 text-rose-600 border-none' :
+                                                                    sec.occupied >= sec.capacityMcs * 0.9 ? 'bg-amber-500/10 text-amber-600 border-none' :
+                                                                    'bg-emerald-500/10 text-emerald-600 border-none'
+                                                                }>
+                                                                    {sec.occupied} MCs
+                                                                </Badge>
+                                                                <span className="text-xs text-muted-foreground">({Math.round(sec.occupied / sec.capacityMcs * 100)}%)</span>
+                                                            </div>
+                                                        </TableCell>
+                                                        <TableCell className="text-sm">{sec.capacityMcs} MCs</TableCell>
+                                                        <TableCell className="text-right">
+                                                            <div className="flex justify-end gap-2">
+                                                                <Button onClick={() => openEditModal(sec)} variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-indigo-600">
+                                                                    <Edit2 size={16} />
+                                                                </Button>
+                                                                <Button onClick={() => handleDelete(sec.id.toString())} variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive">
+                                                                    <Trash2 size={16} />
+                                                                </Button>
+                                                            </div>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))
+                                                : activeTab === 'stores'
+                                                    ? stores.map((store) => (
                                                     <TableRow key={store.id} className="hover:bg-muted/10">
                                                         <TableCell className="font-medium">{store.name}</TableCell>
                                                         <TableCell><Badge variant="outline">{store.type}</Badge></TableCell>
@@ -842,9 +942,9 @@ export default function AdminPage() {
                                                             </TableCell>
                                                         </TableRow>
                                                     ))}
-                                            {(activeTab === 'stores' ? stores.length === 0 : data.length === 0) && (
+                                            {(activeTab === 'stores' ? stores.length === 0 : activeTab === 'sections' ? sections.length === 0 : data.length === 0) && (
                                                 <TableRow className="hover:bg-transparent bg-muted/50">
-                                                    <TableCell colSpan={activeTab === 'stores' ? 5 : (activeTab === 'varieties' ? 3 : 2)} className="h-48 text-center text-muted-foreground">
+                                                    <TableCell colSpan={activeTab === 'stores' || activeTab === 'sections' ? 5 : (activeTab === 'varieties' ? 3 : 2)} className="h-48 text-center text-muted-foreground">
                                                         <div className="flex flex-col items-center justify-center gap-2">
                                                             <Database className="h-8 w-8 opacity-20" />
                                                             No records found. Click "Add New" to create one.
@@ -874,7 +974,42 @@ export default function AdminPage() {
                         </CardHeader>
                         <CardContent className="p-6 overflow-y-auto">
                             <form onSubmit={handleSubmit} className="space-y-4">
-                                {activeTab === 'stores' ? (
+                                {activeTab === 'sections' ? (
+                                    <div className="space-y-4">
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium">Store Name</label>
+                                            <Select
+                                                value={sectionForm.storeName}
+                                                onChange={(e) => setSectionForm({ ...sectionForm, storeName: e.target.value })}
+                                            >
+                                                {stores.map(store => (
+                                                    <option key={store.id} value={store.name}>
+                                                        {store.name}
+                                                    </option>
+                                                ))}
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium">Section Name</label>
+                                            <Input
+                                                required
+                                                value={sectionForm.name}
+                                                onChange={(e) => setSectionForm({ ...sectionForm, name: e.target.value })}
+                                                placeholder="e.g. Chamber A or Row 1"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium">Maximum Capacity (MCs)</label>
+                                            <Input
+                                                type="number"
+                                                required
+                                                min="1"
+                                                value={sectionForm.capacityMcs}
+                                                onChange={(e) => setSectionForm({ ...sectionForm, capacityMcs: parseInt(e.target.value) || 0 })}
+                                            />
+                                        </div>
+                                    </div>
+                                ) : activeTab === 'stores' ? (
                                     <>
                                         <div className="space-y-2">
                                             <label className="text-sm font-medium">Store Name</label>
@@ -1141,7 +1276,7 @@ export default function AdminPage() {
                                      Audit Log Detail
                                  </CardTitle>
                                  <CardDescription className="text-xs mt-1">
-                                     ID: {selectedLog.id} | Timestamp: {new Date(selectedLog.timestamp).toLocaleString()}
+                                     ID: {selectedLog.id} | Timestamp: {formatDisplayDateTime(selectedLog.timestamp)}
                                  </CardDescription>
                              </div>
                              <Button onClick={() => setSelectedLog(null)} variant="ghost" size="icon" className="rounded-full">
@@ -1173,7 +1308,7 @@ export default function AdminPage() {
                                  }
 
                                  const compareFields = [
-                                     { label: 'Movement Date', getVal: (s: any) => s.log?.movement_datetime?.split('T')[0] || 'N/A' },
+                                     { label: 'Movement Date', getVal: (s: any) => formatDisplayDate(s.log?.movement_datetime) },
                                      { label: 'Action Type', getVal: (s: any) => s.log?.action_type || 'N/A' },
                                      { label: 'From Store', getVal: (s: any) => s.log?.from_location || 'N/A' },
                                      { label: 'To Store', getVal: (s: any) => s.log?.to_location || 'N/A' },

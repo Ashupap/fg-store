@@ -55,11 +55,14 @@ export async function GET(request: NextRequest) {
         if (!user) {
             return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
         }
+        if (user.role !== 'operator') {
+            return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+        }
         const db = getDb();
 
         // 1. Get Stores
-        const storeQuery = 'SELECT id, name, capacity_tons FROM stores WHERE is_active = 1';
-        const stores = db.prepare(storeQuery).all() as { id: number; name: string; capacity_tons: number }[];
+        const storeQuery = 'SELECT id, name, capacity_tons, type FROM stores WHERE is_active = 1';
+        const stores = db.prepare(storeQuery).all() as { id: number; name: string; capacity_tons: number; type: string }[];
 
         if (stores.length === 0) {
             return NextResponse.json({ success: true, data: [] });
@@ -125,7 +128,8 @@ export async function GET(request: NextRequest) {
                 name: store.name,
                 capacityTons: store.capacity_tons || 0,
                 usedTons: Math.round(usedTons * 100) / 100,
-                totalMCs
+                totalMCs,
+                type: store.type
             };
         });
 

@@ -10,9 +10,9 @@ export async function POST(request: NextRequest) {
         // Validate input
         const validation = loginSchema.safeParse(body);
         if (!validation.success) {
-            const error = validation.error as any;
+            const error = validation.error;
             return NextResponse.json(
-                { success: false, error: error.errors[0]?.message || 'Validation failed' },
+                { success: false, error: error.issues[0]?.message || 'Validation failed' },
                 { status: 400 }
             );
         }

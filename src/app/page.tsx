@@ -1,218 +1,259 @@
 import Link from 'next/link';
-import { LayoutDashboard, Package, Snowflake, TrendingUp, Settings, ArrowRight, LogIn, LogOut, Ship, Truck, BookOpen } from 'lucide-react';
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { 
+    Ship, Package, TrendingUp, Truck, Settings, BookOpen, 
+    ArrowRight, LogIn, LogOut, BarChart3, Shield, Zap,
+    CheckCircle, Layers, Snowflake
+} from 'lucide-react';
 import { getCurrentUser } from '@/lib/auth';
-import { getDb } from '@/lib/db';
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
 import { BackgroundBeams } from "@/components/ui/aceternity/background-beams";
-import { TypewriterEffect } from "@/components/ui/aceternity/typewriter-effect";
-import { HoverBorderGradient } from "@/components/ui/aceternity/hover-border-gradient";
 
 export const dynamic = 'force-dynamic';
 
-async function getStats() {
-  const db = getDb();
-  try {
-    const totalStock = db.prepare('SELECT COUNT(*) as count FROM fg_stock_master').get() as { count: number };
-    const availableStock = db.prepare('SELECT COUNT(*) as count FROM fg_stock_master WHERE status = ?').get('Available') as { count: number };
-    const varieties = db.prepare('SELECT COUNT(DISTINCT variety) as count FROM fg_stock_master').get() as { count: number };
-    const todayActivity = db.prepare("SELECT COUNT(*) as count FROM stock_movement_log WHERE date(created_at) = date('now')").get() as { count: number };
+const FEATURES = [
+    {
+        icon: Package,
+        title: 'Stock Movement',
+        description: 'Record inward receipts, inter-store transfers, and dispatches with full FIFO traceability and MC-level tracking.',
+        color: 'text-emerald-500',
+        bg: 'bg-emerald-500/10',
+    },
+    {
+        icon: BarChart3,
+        title: 'Live Dashboard',
+        description: 'Real-time inventory position across all cold stores. Aging alerts, FCL capacity indicators, and exportable reports.',
+        color: 'text-blue-500',
+        bg: 'bg-blue-500/10',
+    },
+    {
+        icon: TrendingUp,
+        title: 'PO Allocation',
+        description: 'Auto-allocate stock to purchase orders using FIFO. Track fulfillment status and release allocations with one click.',
+        color: 'text-indigo-500',
+        bg: 'bg-indigo-500/10',
+    },
+    {
+        icon: Truck,
+        title: 'Shipment Planning',
+        description: 'Plan container loading for FCL shipments. Generate manifests and track container utilization in real time.',
+        color: 'text-amber-500',
+        bg: 'bg-amber-500/10',
+    },
+    {
+        icon: Layers,
+        title: 'Repacking Workflow',
+        description: 'Manage dummy-to-branded carton repacking with customer barcode integration and sequential MC code tracking.',
+        color: 'text-purple-500',
+        bg: 'bg-purple-500/10',
+    },
+    {
+        icon: Shield,
+        title: 'Role-Based Access',
+        description: 'Granular permissions for admin, GM, managers, operators and marketing. Custom roles with fine-grained controls.',
+        color: 'text-rose-500',
+        bg: 'bg-rose-500/10',
+    },
+    {
+        icon: Zap,
+        title: 'Sequential MC Codes',
+        description: 'Auto-generate 3–4 character sequential codes for each master carton. Print label sheets for operators in one click.',
+        color: 'text-yellow-500',
+        bg: 'bg-yellow-500/10',
+    },
+    {
+        icon: Settings,
+        title: 'System Administration',
+        description: 'Manage master data (varieties, grades, packings), stores, users, and feature toggles from a single admin panel.',
+        color: 'text-slate-500',
+        bg: 'bg-slate-500/10',
+    },
+];
 
-    return {
-      total: totalStock.count,
-      available: availableStock.count,
-      varieties: varieties.count,
-      activity: todayActivity.count
-    };
-  } catch (e) {
-    return { total: 0, available: 0, varieties: 0, activity: 0 };
-  }
-}
+const WORKFLOW_STEPS = [
+    { step: '01', title: 'Receive Stock', desc: 'Production sends MCs to store. Operator records inward via Stock Movement. System generates sequential MC codes.' },
+    { step: '02', title: 'Allocate to Orders', desc: 'Marketing creates POs. System auto-allocates available stock using FIFO logic, ensuring oldest stock ships first.' },
+    { step: '03', title: 'Transfer or Repack', desc: 'Move stock between cold stores or initiate repacking. System tracks each MC through every stage.' },
+    { step: '04', title: 'Dispatch & Ship', desc: 'Dispatch against PO. Plan containers, generate manifests, and complete customer dispatch with full audit trail.' },
+];
 
-export default async function Home() {
-  const user = await getCurrentUser();
-  const stats = await getStats();
+export default async function LandingPage() {
+    const user = await getCurrentUser();
 
-  // Fetch Settings
-  const db = getDb();
-  const settingsRes = db.prepare("SELECT value FROM settings WHERE key = 'enable_container_planning'").get() as { value: string } | undefined;
-  const isShipmentsEnabled = settingsRes?.value === 'true';
+    return (
+        <div className="min-h-screen w-full bg-white relative flex flex-col antialiased overflow-hidden selection:bg-[#2E8B57]/20 selection:text-[#2E8B57]">
+            <BackgroundBeams className="opacity-15" />
 
-  const titleWords = [
-    { text: "Ocean", className: "text-slate-900" },
-    { text: "Stock", className: "text-slate-900" },
-    { text: "Manager", className: "text-[#2E8B57]" },
-  ];
+            <div className="relative z-10 w-full flex flex-col min-h-screen">
+                {/* Header */}
+                <header className="border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-50">
+                    <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-[#2E8B57]/10 rounded-xl border border-[#2E8B57]/20 shadow-[0_0_15px_rgba(46,139,87,0.2)]">
+                                <Ship className="text-[#2E8B57] h-5 w-5" />
+                            </div>
+                            <div>
+                                <span className="font-bold text-lg tracking-tight text-slate-900">Marine Flow</span>
+                                <span className="hidden sm:inline text-xs text-slate-500 ml-2">FG Store ERP</span>
+                            </div>
+                        </div>
 
-  return (
-    <div className="min-h-screen w-full bg-white relative flex flex-col items-center justify-center antialiased overflow-hidden selection:bg-[#2E8B57]/20 selection:text-[#2E8B57]">
-      {/* Background Beams */}
-      <BackgroundBeams className="opacity-20" />
+                        <nav className="hidden md:flex items-center gap-6 text-sm text-slate-600">
+                            <a href="#features" className="hover:text-slate-900 transition-colors">Features</a>
+                            <a href="#workflow" className="hover:text-slate-900 transition-colors">How it Works</a>
+                            <Link href="/guide" className="hover:text-slate-900 transition-colors">Guide</Link>
+                        </nav>
 
-      {/* Content Container - z-10 to sit above beams */}
-      <div className="relative z-10 w-full flex flex-col min-h-screen">
-
-        {/* Header */}
-        <header className="border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-50">
-          <div className="container mx-auto px-6 h-20 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-[#2E8B57]/10 rounded-xl border border-[#2E8B57]/20 shadow-[0_0_15px_rgba(46,139,87,0.3)]">
-                <Ship className="text-[#2E8B57] h-6 w-6" />
-              </div>
-              <span className="font-bold text-xl tracking-tight text-slate-900">Marine Flow</span>
-            </div>
-
-            <div className="flex items-center gap-4">
-              {user ? (
-                <div className="flex items-center gap-4">
-                  <span className="text-sm text-slate-600 hidden sm:block">Welcome, {user.name}</span>
-                  <form action={async () => {
-                    'use server';
-                    const cookieStore = await cookies();
-                    cookieStore.delete('auth-token');
-                    redirect('/');
-                  }}>
-                    <Button variant="ghost" size="sm" className="text-slate-600 hover:text-slate-900 hover:bg-slate-100 cursor-pointer">
-                      <LogOut size={16} className="mr-2" /> Logout
-                    </Button>
-                  </form>
-                </div>
-              ) : (
-                <Link href="/login">
-                  <Button className="rounded-full bg-[#2E8B57] text-white hover:bg-[#257045] flex items-center space-x-2 px-6 py-2 shadow-lg shadow-[#2E8B57]/20 transition-all hover:scale-105 cursor-pointer">
-                    <LogIn size={16} />
-                    <span>Login</span>
-                  </Button>
-                </Link>
-              )}
-            </div>
-          </div>
-        </header>
-
-        {/* Main Content */}
-        <main className="flex-1 container mx-auto px-6 py-12 flex flex-col items-center">
-
-          <div className="max-w-6xl mx-auto space-y-20 w-full">
-
-            {/* Hero */}
-            <div className="text-center space-y-8 pt-10">
-              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-[#2E8B57]/30 bg-[#2E8B57]/5 text-[#2E8B57] text-sm font-medium mb-6 backdrop-blur-sm">
-                <Snowflake size={14} className="animate-pulse" />
-                <span>Next-Gen Seafood Logistics</span>
-              </div>
-
-              <TypewriterEffect words={titleWords} className="text-6xl md:text-8xl" cursorClassName="bg-[#2E8B57]" />
-
-              <p className="text-lg md:text-2xl text-slate-600 max-w-3xl mx-auto leading-relaxed font-light mt-6">
-                Precision seafood inventory tracking powered by <span className="text-[#2E8B57] font-medium">advanced analytics</span>.
-                Monitor stock levels, manage movements, and optimize logistics in real-time.
-              </p>
-
-              <div className="flex flex-col sm:flex-row justify-center gap-6 pt-10">
-                <Link href="/dashboard">
-                  <Button size="lg" className="rounded-full bg-[#2E8B57] text-white hover:bg-[#257045] px-8 py-6 text-lg shadow-xl shadow-[#2E8B57]/25 hover:scale-105 transition-all cursor-pointer">
-                    Open Dashboard <ArrowRight className="ml-2 h-5 w-5" />
-                  </Button>
-                </Link>
-
-                <Link href={user ? "/stock-movement" : "/login?redirect=/stock-movement"}>
-                  <Button size="lg" variant="outline" className="h-[52px] rounded-full px-8 text-lg border-2 border-[#2E8B57] text-[#2E8B57] hover:bg-[#2E8B57]/5 hover:text-[#257045] backdrop-blur-md transition-all cursor-pointer">
-                    Record Movement
-                  </Button>
-                </Link>
-              </div>
-            </div>
-
-            {/* Stats Grid - High Contrast */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              {[
-                { label: "Total Stock", value: stats.total.toLocaleString(), unit: "Master Cartons", icon: Package, color: "text-[#2E8B57]" },
-                { label: "Ready to Ship", value: stats.available.toLocaleString(), unit: "Available Stock", icon: Ship, color: "text-emerald-600" },
-                { label: "Active SKUs", value: stats.varieties.toLocaleString(), unit: "Product Varieties", icon: Snowflake, color: "text-amber-600" },
-                { label: "Transactions", value: stats.activity.toLocaleString(), unit: "Today's Activity", icon: TrendingUp, color: "text-rose-600" },
-              ].map((stat, i) => (
-                <div key={i} className="group relative p-[1px] rounded-2xl bg-gradient-to-b from-slate-200 to-slate-100 hover:from-[#2E8B57]/50 hover:to-[#2E8B57]/20 transition-all duration-500 shadow-sm hover:shadow-lg">
-                  <div className="bg-white h-full w-full rounded-2xl p-6 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-                      <stat.icon className={`w-24 h-24 ${stat.color}`} />
+                        <div className="flex items-center gap-3">
+                            {user ? (
+                                <div className="flex items-center gap-3">
+                                    <span className="hidden sm:block text-sm text-slate-600">
+                                        Welcome, <span className="font-medium">{user.name}</span>
+                                    </span>
+                                    <Link href="/dashboard">
+                                        <button className="flex items-center gap-2 rounded-full bg-[#2E8B57] text-white hover:bg-[#257045] px-5 py-2 text-sm font-medium shadow-lg shadow-[#2E8B57]/25 transition-all hover:scale-105">
+                                            Open Dashboard <ArrowRight className="h-4 w-4" />
+                                        </button>
+                                    </Link>
+                                    <Link href="/api/auth/logout" prefetch={false}>
+                                        <button className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-900 px-3 py-2 rounded-lg hover:bg-slate-100 transition-colors">
+                                            <LogOut size={16} /> Logout
+                                        </button>
+                                    </Link>
+                                </div>
+                            ) : (
+                                <Link href="/login">
+                                    <button className="flex items-center gap-2 rounded-full bg-[#2E8B57] text-white hover:bg-[#257045] px-6 py-2 text-sm font-medium shadow-lg shadow-[#2E8B57]/25 transition-all hover:scale-105">
+                                        <LogIn size={16} /> Login
+                                    </button>
+                                </Link>
+                            )}
+                        </div>
                     </div>
-                    <div className={`p-3 w-fit rounded-xl bg-[#2E8B57]/5 border border-[#2E8B57]/10 mb-4 ${stat.color}`}>
-                      <stat.icon className="h-6 w-6" />
-                    </div>
-                    <div className="space-y-1 relative z-10">
-                      <div className="text-4xl font-bold text-slate-900 tracking-tight">{stat.value}</div>
-                      <p className="text-slate-500 text-sm font-medium">{stat.label}</p>
-                      <p className="text-slate-400 text-xs">{stat.unit}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+                </header>
 
-            {/* Navigation Deck */}
-            <div className="grid md:grid-cols-2 gap-8 pb-20">
-              {/* Dashboard Big Card */}
-              <Link href="/dashboard" className="group relative col-span-1 md:col-span-2 lg:col-span-1 cursor-pointer">
-                <div className="absolute -inset-0.5 bg-gradient-to-r from-[#2E8B57] to-emerald-500 rounded-3xl opacity-0 group-hover:opacity-20 blur transition duration-500"></div>
-                <div className="relative h-full bg-white rounded-3xl p-8 border border-slate-200 shadow-xl group-hover:shadow-2xl flex flex-col justify-between overflow-hidden transition-all">
-                  <div className="absolute inset-0 bg-gradient-to-br from-[#2E8B57]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-
-                  <div className="relative z-10">
-                    <div className="w-16 h-16 rounded-2xl bg-[#2E8B57]/10 flex items-center justify-center mb-6 border border-[#2E8B57]/20">
-                      <LayoutDashboard className="text-[#2E8B57] w-8 h-8" />
+                {/* Hero */}
+                <section className="flex-1 flex flex-col items-center justify-center text-center px-6 py-24 max-w-4xl mx-auto w-full">
+                    <div className="inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-full bg-[#2E8B57]/10 text-[#2E8B57] border border-[#2E8B57]/30 mb-6">
+                        <Snowflake size={13} className="animate-pulse" />
+                        Seafood Processing ERP
                     </div>
-                    <h3 className="text-3xl font-bold text-slate-900 mb-3">Main Dashboard</h3>
-                    <p className="text-slate-500 text-lg leading-relaxed">
-                      Comprehensive view of your frozen inventory. Analyze aging stock, track allocations, and monitor FCL capacities.
+
+                    <h1 className="text-5xl md:text-7xl font-bold text-slate-900 tracking-tight leading-[1.1] mb-6">
+                        Finished Goods
+                        <span className="text-[#2E8B57] block">Store Management</span>
+                    </h1>
+
+                    <p className="text-lg md:text-xl text-slate-600 max-w-2xl leading-relaxed mb-10 font-light">
+                        End-to-end traceability for your cold store operations. From production inward to customer dispatch — every master carton tracked, every movement logged.
                     </p>
-                  </div>
-                  <div className="mt-8 flex items-center text-[#2E8B57] font-semibold group-hover:translate-x-2 transition-transform">
-                    Explore Analytics <ArrowRight className="ml-2 w-5 h-5" />
-                  </div>
-                </div>
-              </Link>
 
-              {/* Right Side Grid */}
-              <div className="grid gap-6">
-                {[
-                  { href: "/stock-movement", title: "Stock Movement", icon: Package, desc: "Inward, Outward & Returns", roles: ['admin', 'general_manager', 'manager', 'operator'] },
-                  { href: "/po-allocation", title: "PO Allocation", icon: TrendingUp, desc: "Order Fulfillment & Tracking", roles: ['admin', 'general_manager', 'marketing_manager'] },
-                  ...(isShipmentsEnabled ? [{ href: "/shipments", title: "Shipment Planning", icon: Truck, desc: "Container Loading & Manifests", roles: ['admin', 'general_manager'] }] : []),
-                  { href: "/admin", title: "System Admin", icon: Settings, desc: "Master Data & Configuration", roles: ['admin', 'general_manager'] },
-                  { href: "/guide", title: "User Guide", icon: BookOpen, desc: "System Documentation & Help", roles: ['all'] }
-                ].filter(item => !user || item.roles.includes('all') || (user.role && item.roles.includes(user.role))).map((item, i) => (
-                  <Link key={i} href={(user || item.roles.includes('all')) ? item.href : `/login?redirect=${item.href}`} className="group relative cursor-pointer">
-                    <div className="h-full bg-white hover:bg-slate-50 border border-slate-200 hover:border-[#2E8B57]/20 rounded-2xl p-6 transition-all duration-300 flex items-center gap-6 shadow-md hover:shadow-lg">
-                      <div className="p-4 rounded-xl bg-slate-100 border border-slate-200 group-hover:bg-[#2E8B57]/10 group-hover:scale-110 transition-all">
-                        <item.icon className="text-slate-600 group-hover:text-[#2E8B57] w-6 h-6" />
-                      </div>
-                      <div>
-                        <h4 className="text-xl font-bold text-slate-900 group-hover:text-[#2E8B57] transition-colors">{item.title}</h4>
-                        <p className="text-slate-500 text-sm">{item.desc}</p>
-                      </div>
-                      <ArrowRight className="ml-auto text-slate-400 group-hover:text-[#2E8B57] group-hover:translate-x-1 transition-all" />
+                    <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                        {user ? (
+                            <Link href="/dashboard">
+                                <button className="flex items-center gap-2 rounded-full bg-[#2E8B57] text-white hover:bg-[#257045] px-10 py-4 text-lg font-semibold shadow-xl shadow-[#2E8B57]/25 hover:scale-105 transition-all">
+                                    Open Dashboard <ArrowRight className="h-5 w-5" />
+                                </button>
+                            </Link>
+                        ) : (
+                            <>
+                                <Link href="/login">
+                                    <button className="flex items-center gap-2 rounded-full bg-[#2E8B57] text-white hover:bg-[#257045] px-10 py-4 text-lg font-semibold shadow-xl shadow-[#2E8B57]/25 hover:scale-105 transition-all">
+                                        Get Started <ArrowRight className="h-5 w-5" />
+                                    </button>
+                                </Link>
+                                <a href="#features">
+                                    <button className="flex items-center gap-2 h-14 rounded-full px-8 text-lg font-medium border-2 border-[#2E8B57]/40 text-[#2E8B57] hover:bg-[#2E8B57]/5 transition-all">
+                                        See Features
+                                    </button>
+                                </a>
+                            </>
+                        )}
                     </div>
-                  </Link>
-                ))}
-              </div>
+
+                    {/* Trust badges */}
+                    <div className="mt-12 flex flex-wrap justify-center gap-6 text-sm text-slate-500">
+                        {['FIFO Inventory Control', 'Role-Based Access', 'Audit Trail', 'Excel Export'].map(item => (
+                            <div key={item} className="flex items-center gap-1.5">
+                                <CheckCircle size={14} className="text-[#2E8B57]" />
+                                {item}
+                            </div>
+                        ))}
+                    </div>
+                </section>
+
+                {/* Features Grid */}
+                <section id="features" className="py-20 px-6 bg-slate-50/80 border-t border-slate-100">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-14">
+                            <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">Everything you need</h2>
+                            <p className="text-slate-600 max-w-xl mx-auto text-lg">Purpose-built for seafood processing operations. Every feature designed around your real workflow.</p>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                            {FEATURES.map((feature, i) => (
+                                <div key={i} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm hover:shadow-md hover:border-[#2E8B57]/20 transition-all duration-300 group">
+                                    <div className={`w-11 h-11 rounded-xl ${feature.bg} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
+                                        <feature.icon className={`w-5 h-5 ${feature.color}`} />
+                                    </div>
+                                    <h3 className="font-semibold text-slate-900 mb-2">{feature.title}</h3>
+                                    <p className="text-sm text-slate-500 leading-relaxed">{feature.description}</p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </section>
+
+                {/* Workflow */}
+                <section id="workflow" className="py-20 px-6 bg-white border-t border-slate-100">
+                    <div className="max-w-5xl mx-auto">
+                        <div className="text-center mb-14">
+                            <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">How it Works</h2>
+                            <p className="text-slate-600 max-w-xl mx-auto text-lg">Four simple stages — from production floor to customer delivery.</p>
+                        </div>
+
+                        <div className="grid md:grid-cols-4 gap-6 relative">
+                            {/* Connector line */}
+                            <div className="hidden md:block absolute top-8 left-[12.5%] right-[12.5%] h-0.5 bg-gradient-to-r from-[#2E8B57]/30 via-[#2E8B57]/60 to-[#2E8B57]/30" />
+
+                            {WORKFLOW_STEPS.map((step, i) => (
+                                <div key={i} className="relative flex flex-col items-center text-center">
+                                    <div className="w-16 h-16 rounded-full bg-[#2E8B57]/10 border-2 border-[#2E8B57]/30 flex items-center justify-center mb-4 relative z-10">
+                                        <span className="text-[#2E8B57] font-bold text-sm">{step.step}</span>
+                                    </div>
+                                    <h3 className="font-semibold text-slate-900 mb-2">{step.title}</h3>
+                                    <p className="text-sm text-slate-500 leading-relaxed">{step.desc}</p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </section>
+
+                {/* CTA */}
+                <section className="py-16 px-6 bg-gradient-to-br from-[#2E8B57] to-emerald-600">
+                    <div className="max-w-3xl mx-auto text-center">
+                        <h2 className="text-3xl font-bold text-white mb-4">Ready to streamline your operations?</h2>
+                        <p className="text-emerald-100 text-lg mb-8">Login and start managing your cold store inventory with precision.</p>
+                        <Link href={user ? '/dashboard' : '/login'}>
+                            <button className="flex items-center gap-2 mx-auto rounded-full bg-white text-[#2E8B57] hover:bg-emerald-50 px-10 py-4 text-lg font-semibold shadow-xl hover:scale-105 transition-all">
+                                {user ? 'Open Dashboard' : 'Login to Get Started'} <ArrowRight className="h-5 w-5" />
+                            </button>
+                        </Link>
+                    </div>
+                </section>
+
+                {/* Footer */}
+                <footer className="border-t border-slate-200 bg-white py-6 px-6">
+                    <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-slate-500">
+                        <div className="flex items-center gap-2">
+                            <Ship className="text-[#2E8B57] h-4 w-4" />
+                            <span className="font-medium text-slate-700">Marine Flow</span>
+                            <span>· FG Store Management System</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span>Built with ❤️ in India</span>
+                        </div>
+                    </div>
+                </footer>
             </div>
-
-
-            {/* Footer */}
-            <div className="text-center pb-8 relative z-10">
-              <div className="inline-flex items-center gap-2 text-slate-500 bg-white/60 px-4 py-2 rounded-full border border-slate-200 backdrop-blur-md">
-                <span>Built with</span>
-                <span className="animate-heartbeat text-red-500 text-lg">❤️</span>
-                <span>in India</span>
-              </div>
-            </div>
-
-          </div>
-        </main>
-      </div >
-    </div >
-  );
+        </div>
+    );
 }

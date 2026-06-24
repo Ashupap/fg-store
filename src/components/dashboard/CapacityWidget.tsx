@@ -9,6 +9,7 @@ interface CapacityData {
     capacityTons: number;
     usedTons: number;
     totalMCs: number;
+    type: string;
 }
 
 export default function CapacityWidget() {
@@ -71,7 +72,12 @@ export default function CapacityWidget() {
                         <div key={store.id} className="space-y-2">
                             <div className="flex justify-between items-end text-sm">
                                 <div className="font-medium flex items-center gap-2">
-                                    {store.name}
+                                    <span>{store.name}</span>
+                                    {store.type === 'Rented' && (
+                                        <span className="text-[10px] px-1.5 py-0.5 bg-violet-600/10 text-violet-700 font-bold border border-violet-500/20 rounded-full">
+                                            Rented
+                                        </span>
+                                    )}
                                     {isCritical && <AlertTriangle size={14} className="text-red-500 animate-pulse" />}
                                 </div>
                                 <div className="text-muted-foreground">

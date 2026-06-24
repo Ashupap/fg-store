@@ -1,12 +1,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
-import { getCurrentUser, hashPassword } from '@/lib/auth';
+import { getCurrentUser, hashPassword, hasPermission } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
     try {
         const user = await getCurrentUser();
-        if (!user || user.role !== 'admin') {
+        if (!user || !hasPermission(user, 'users:manage')) {
             return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
         }
 
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
     try {
         const user = await getCurrentUser();
-        if (!user || user.role !== 'admin') {
+        if (!user || !hasPermission(user, 'users:manage')) {
             return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
         }
 
@@ -59,9 +59,11 @@ export async function POST(request: NextRequest) {
 
         const passwordHash = await hashPassword(password);
 
-        // Enforce Single Store Restriction for Operators and Managers
-        if ((role === 'operator' || role === 'manager') && assigned_store_ids && assigned_store_ids.length > 1) {
-            return NextResponse.json({ success: false, error: 'Operators and Managers can only be assigned to one store.' }, { status: 400 });
+        // Enforce Single Store Restriction for non-global roles
+        const globalRoles = ['admin', 'general_manager', 'marketing_manager'];
+        const isGlobalRole = globalRoles.includes(role);
+        if (!isGlobalRole && assigned_store_ids && assigned_store_ids.length > 1) {
+            return NextResponse.json({ success: false, error: 'Localized operators and managers can only be assigned to one store.' }, { status: 400 });
         }
 
         // Transaction for atomicity

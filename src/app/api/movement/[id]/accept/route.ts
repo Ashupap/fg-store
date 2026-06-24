@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import { allocateSectionsForBatch } from '@/lib/stock-logic';
 
 export async function POST(
     request: NextRequest,
@@ -26,26 +27,28 @@ export async function POST(
             return NextResponse.json({ success: false, error: 'Movement is not in transit' }, { status: 400 });
         }
 
-        // 2. Verify Permission: User must be assigned to the TO location
-        // (Admins can approve anything, Managers/Operators only their stores)
-        if (user.role !== 'admin') {
+        // 2. Verify Permission: User must be assigned to the TO location (or FROM location if TO is a rented store)
+        if (user.role !== 'admin' && user.role !== 'general_manager') {
             const allowedStores = user.assigned_store_names || [];
-            if (!allowedStores.includes(movement.to_location)) {
+            
+            const toStoreDetails = db.prepare('SELECT type FROM stores WHERE name = ?').get(movement.to_location) as { type: string } | undefined;
+            const isToStoreRented = toStoreDetails?.type === 'Rented';
+
+            const isAuthorized = allowedStores.includes(movement.to_location) || 
+                               (isToStoreRented && allowedStores.includes(movement.from_location));
+
+            if (!isAuthorized) {
                 return NextResponse.json({
                     success: false,
-                    error: `Unauthorized: You are not assigned to receive stock at '${movement.to_location}'`
+                    error: isToStoreRented
+                        ? `Unauthorized: You are not assigned to either the source '${movement.from_location}' or destination '${movement.to_location}' stores`
+                        : `Unauthorized: You are not assigned to receive stock at '${movement.to_location}'`
                 }, { status: 403 });
             }
         }
 
         // 3. Update Stock & Movement
         const mcNumbers = movement.mc_numbers ? movement.mc_numbers.split(',') : [];
-
-        const updateStock = db.prepare(`
-            UPDATE fg_stock_master
-            SET cold_store = ?, status = 'Available', updated_at = CURRENT_TIMESTAMP
-            WHERE mc_number = ?
-        `);
 
         const updateMovement = db.prepare(`
             UPDATE stock_movement_log
@@ -54,10 +57,37 @@ export async function POST(
         `);
 
         const transaction = db.transaction(() => {
-            // Move stock to Final Destination
-            for (const mc of mcNumbers) {
-                updateStock.run(movement.to_location, mc);
+            const settingVal = db.prepare("SELECT value FROM settings WHERE key = 'enable_location_mapping'").get() as { value: string } | undefined;
+            const useMapping = settingVal?.value === 'true';
+
+            // Allocate sections in destination store if enabled
+            const allocations = useMapping ? allocateSectionsForBatch(db, movement.to_location, mcNumbers.length) : [];
+            let allocationIdx = 0;
+            let allocatedCount = 0;
+
+            const updateStock = db.prepare(`
+                UPDATE fg_stock_master
+                SET cold_store = ?, status = 'Available', section_id = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE mc_number = ?
+            `);
+
+            // Move stock to Final Destination and assign sections
+            for (let i = 0; i < mcNumbers.length; i++) {
+                const mc = mcNumbers[i];
+                let currentSectionId = null;
+
+                if (useMapping && allocations.length > 0) {
+                    if (allocatedCount >= allocations[allocationIdx].count) {
+                        allocationIdx++;
+                        allocatedCount = 0;
+                    }
+                    currentSectionId = allocations[allocationIdx].sectionId;
+                    allocatedCount++;
+                }
+
+                updateStock.run(movement.to_location, currentSectionId, mc);
             }
+
             // Mark movement as completed
             updateMovement.run(user.id, id);
         });

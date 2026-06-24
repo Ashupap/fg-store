@@ -17,6 +17,7 @@ export interface UserPublic {
     email: string;
     name: string;
     role: string;
+    permissions?: string[];
 
     assigned_store_ids?: number[];
     assigned_store_names?: string[];
@@ -188,6 +189,7 @@ export interface MovementResult {
     movedCount?: number;
     notMoved?: string[];
     error?: string;
+    shortCodes?: string[];
 }
 
 // Auth types
@@ -235,7 +237,10 @@ export interface POLineItemWithDetails {
 export interface POWithLineItems {
     id: number;
     po_number: string;
+    customer?: string | null;
     order_date: string | null;
+    branding_type?: string | null;
+    loading_store?: string | null;
     status: string;
     created_at: string;
     line_items: POLineItemWithDetails[];

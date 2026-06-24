@@ -27,10 +27,12 @@ import {
     Download,
     History,
     Layers,
-    Scissors
+    Scissors,
+    FileText
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import type { StockSummary, UserPublic } from '@/types';
+import { formatDisplayDate, formatDisplayDateTime } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -74,14 +76,17 @@ export default function StockMovementPage() {
         message: string; 
         action?: { label: string; onClick: () => void } 
     } | null>(null);
-    const [view, setView] = useState<'operations' | 'reports'>('operations');
+    const [view, setView] = useState<'operations' | 'reports' | 'locator'>('operations');
 
     // Dispatch Specific State
     const [activePOs, setActivePOs] = useState<any[]>([]);
     const [dispatchPurpose, setDispatchPurpose] = useState<'SALE' | 'REPACKING'>('SALE');
     const [selectedPO, setSelectedPO] = useState<string>('');
+    const [selectedPODetails, setSelectedPODetails] = useState<any>(null);
     const [poLineItems, setPoLineItems] = useState<any[]>([]);
     const [selectedLineItem, setSelectedLineItem] = useState<string>('');
+    const [dispatchPoStock, setDispatchPoStock] = useState<any[]>([]);
+    const [fetchingPoStock, setFetchingPoStock] = useState(false);
 
     // Scanning State
     const [isScanMode, setIsScanMode] = useState(false);
@@ -94,6 +99,14 @@ export default function StockMovementPage() {
     const [fetchingStockItems, setFetchingStockItems] = useState(false);
     const [stockSearchQuery, setStockSearchQuery] = useState('');
     const [generatedShortCodes, setGeneratedShortCodes] = useState<string[]>([]);
+
+    // Batch Transfer and Strategy States
+    const [transferMode, setTransferMode] = useState<'spec' | 'batch'>('spec');
+    const [allocationStrategy, setAllocationStrategy] = useState<'FIFO' | 'LIFO'>('FIFO');
+    const [batchDate, setBatchDate] = useState('');
+    const [batchesList, setBatchesList] = useState<any[]>([]);
+    const [selectedBatchIndex, setSelectedBatchIndex] = useState<number | null>(null);
+    const [loadingBatches, setLoadingBatches] = useState(false);
 
     // Dynamic Stock Filters
     const [stockFilters, setStockFilters] = useState<{
@@ -124,12 +137,15 @@ export default function StockMovementPage() {
         changeReason: '',
     });
 
-    const maxSteps = movementType === 'INWARD' ? 2 : 3;
+    const maxSteps = movementType === 'INWARD' || movementType === 'DISPATCH' ? 2 : 3;
     const wizardSteps = movementType === 'INWARD' ? [
         { step: 1, label: 'Specs & Location' },
         { step: 2, label: 'Confirm Quantity' }
+    ] : movementType === 'DISPATCH' ? [
+        { step: 1, label: 'Select PO' },
+        { step: 2, label: 'Verify Stock' }
     ] : [
-        { step: 1, label: (movementType === 'TRANSFER' || movementType === 'DISPATCH') ? 'From Store & Specs' : 'SKU Specs' },
+        { step: 1, label: movementType === 'TRANSFER' ? 'From Store & Specs' : 'SKU Specs' },
         { step: 2, label: 'Locations' },
         { step: 3, label: 'Verify Stock' }
     ];
@@ -249,6 +265,12 @@ export default function StockMovementPage() {
         } catch (error) { console.error(error); }
     }
 
+    useEffect(() => {
+        if (settings['enable_location_mapping'] !== 'true' && view === 'locator') {
+            setView('operations');
+        }
+    }, [settings, view]);
+
     const fetchActivePOs = async () => {
         try {
             const response = await fetch('/api/po/active');
@@ -330,12 +352,42 @@ export default function StockMovementPage() {
     };
 
     useEffect(() => {
-        if (movementType === 'TRANSFER' || movementType === 'DISPATCH' || movementType === 'REPACK_OUT') {
+        if (movementType === 'TRANSFER' || movementType === 'REPACK_OUT') {
             fetchAvailableStockItems();
-        } else {
+        } else if (movementType !== 'DISPATCH') {
             setAvailableStockItems([]);
         }
     }, [formData.fromStore, formData.type, formData.variety, formData.grade, formData.packing, movementType]);
+
+    const fetchBatchesByDate = async (store: string, date: string) => {
+        if (!store || !date) {
+            setBatchesList([]);
+            return;
+        }
+        setLoadingBatches(true);
+        setSelectedBatchIndex(null);
+        try {
+            const res = await fetch(`/api/stock/batches-by-date?store=${encodeURIComponent(store)}&date=${encodeURIComponent(date)}`);
+            const result = await res.json();
+            if (result.success) {
+                setBatchesList(result.data || []);
+            } else {
+                setBatchesList([]);
+                console.error(result.error);
+            }
+        } catch (error) {
+            console.error('Failed to fetch batches by date:', error);
+            setBatchesList([]);
+        } finally {
+            setLoadingBatches(false);
+        }
+    };
+
+    useEffect(() => {
+        if (movementType === 'TRANSFER' && transferMode === 'batch') {
+            fetchBatchesByDate(formData.fromStore, batchDate);
+        }
+    }, [formData.fromStore, batchDate, transferMode, movementType]);
 
     const fetchPOLineItems = async (poId: string) => {
         try {
@@ -345,13 +397,51 @@ export default function StockMovementPage() {
         } catch (error) { console.error(error); }
     };
 
+    const fetchPOStockItems = async (poId: string, store?: string) => {
+        setFetchingPoStock(true);
+        try {
+            const params = new URLSearchParams();
+            if (store) params.append('store', store);
+            const response = await fetch(`/api/po/${poId}/stock?${params.toString()}`);
+            const result = await response.json();
+            if (result.success) {
+                setDispatchPoStock(result.data || []);
+                setAvailableStockItems(result.data || []);
+            } else {
+                setDispatchPoStock([]);
+                setAvailableStockItems([]);
+            }
+        } catch (error) {
+            console.error('Failed to fetch PO stock items:', error);
+            setDispatchPoStock([]);
+            setAvailableStockItems([]);
+        } finally {
+            setFetchingPoStock(false);
+        }
+    };
+
     const handlePOChange = (poId: string) => {
         setSelectedPO(poId);
         setSelectedLineItem('');
         setPoLineItems([]);
         setFormData(prev => ({ ...prev, type: '', variety: '', grade: '', packing: '' }));
         if (poId) {
-            fetchPOLineItems(poId);
+            const poDetails = activePOs.find(p => p.id.toString() === poId);
+            if (movementType === 'DISPATCH') {
+                setSelectedPODetails(poDetails || null);
+                // Auto-populate fromStore from PO loading_store if set
+                if (poDetails?.loading_store) {
+                    setFormData(prev => ({ ...prev, fromStore: poDetails.loading_store, toStore: poDetails.customer || '' }));
+                } else {
+                    setFormData(prev => ({ ...prev, toStore: poDetails?.customer || '' }));
+                }
+                fetchPOStockItems(poId);
+            } else {
+                fetchPOLineItems(poId);
+            }
+        } else {
+            setSelectedPODetails(null);
+            setDispatchPoStock([]);
         }
     };
 
@@ -403,6 +493,18 @@ export default function StockMovementPage() {
         setAvailableStockItems([]);
         setStockSearchQuery('');
         setWizardStep(1);
+
+        // Reset dispatch-specific state
+        setSelectedPO('');
+        setSelectedPODetails(null);
+        setDispatchPoStock([]);
+
+        setTransferMode('spec');
+        setAllocationStrategy('FIFO');
+        setBatchDate('');
+        setBatchesList([]);
+        setSelectedBatchIndex(null);
+        setLoadingBatches(false);
     };
 
     const isStepValid = (step: number): boolean => {
@@ -417,7 +519,14 @@ export default function StockMovementPage() {
             if (movementType === 'INWARD') {
                 return !!formData.type && !!formData.variety && !!formData.packing && !!formData.grade && !!formData.toStore;
             }
-            if (movementType === 'TRANSFER' || movementType === 'DISPATCH') {
+            if (movementType === 'DISPATCH') {
+                // Step 1 for dispatch: PO must be selected with store and destination
+                return !!selectedPO && !!selectedPODetails && !!formData.fromStore && !!formData.toStore;
+            }
+            if (movementType === 'TRANSFER') {
+                if (transferMode === 'batch') {
+                    return !!formData.fromStore && !!batchDate && selectedBatchIndex !== null;
+                }
                 return !!formData.type && !!formData.variety && !!formData.packing && !!formData.grade && !!formData.fromStore;
             }
             return !!formData.type && !!formData.variety && !!formData.packing && !!formData.grade;
@@ -430,8 +539,12 @@ export default function StockMovementPage() {
                 return !!formData.fromStore && !!formData.toStore && formData.fromStore !== formData.toStore;
             }
             if (movementType === 'DISPATCH') {
-                const isSalePoValid = dispatchPurpose === 'SALE' ? !!selectedPO : true;
-                return !!formData.fromStore && !!formData.toStore && !!dispatchPurpose && isSalePoValid;
+                // Step 2 for dispatch: need qty > 0 and not exceeding available
+                if (isScanMode) {
+                    return scannedMCs.length > 0;
+                }
+                const qtyNum = Number(formData.qty);
+                return !!formData.qty && qtyNum > 0 && qtyNum <= dispatchPoStock.length;
             }
             if (movementType === 'REPACK_OUT') {
                 return !!formData.fromStore;
@@ -442,6 +555,9 @@ export default function StockMovementPage() {
             return true;
         }
         if (step === 3) {
+            if (movementType === 'TRANSFER' && transferMode === 'batch') {
+                return true;
+            }
             const isStockBased = ['TRANSFER', 'DISPATCH', 'REPACK_OUT'].includes(movementType);
             const qtyNum = Number(formData.qty);
             if (isStockBased) {
@@ -483,6 +599,13 @@ export default function StockMovementPage() {
             changeReason: '',
         });
 
+        setTransferMode('spec');
+        setAllocationStrategy(req.allocation_strategy || 'FIFO');
+        setBatchDate('');
+        setBatchesList([]);
+        setSelectedBatchIndex(null);
+        setLoadingBatches(false);
+
         setShowModal(true);
     };
 
@@ -517,11 +640,15 @@ export default function StockMovementPage() {
         window.open(`/stock-movement/print-codes/${id}`, '_blank');
     };
 
+    const handlePrintMasterReport = (id: string) => {
+        window.open(`/stock-movement/print-master-report/${id}`, '_blank');
+    };
+
     const handleExport = () => {
         if (!history.length) return;
 
         const data = history.map(item => ({
-            'Date': new Date(item.movement_datetime).toLocaleString(),
+            'Date': formatDisplayDateTime(item.movement_datetime),
             'Type': item.action_type,
             'From': item.from_location || '-',
             'To': item.to_location,
@@ -537,7 +664,7 @@ export default function StockMovementPage() {
         const ws = XLSX.utils.json_to_sheet(data);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Stock Movement");
-        XLSX.writeFile(wb, `Stock_Movement_${new Date().toISOString().split('T')[0]}.xlsx`);
+        XLSX.writeFile(wb, `Stock_Movement_${formatDisplayDate(new Date())}.xlsx`);
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -545,14 +672,28 @@ export default function StockMovementPage() {
         setSubmitting(true);
 
         try {
-            const payload = {
+            // For DISPATCH: build a PO-centric payload
+            const isDispatch = movementType === 'DISPATCH';
+            const dispatchPayload = isDispatch ? {
+                actionType: movementType,
+                fromStore: formData.fromStore,
+                toStore: formData.toStore || selectedPODetails?.customer || 'Customer',
+                qty: isScanMode ? scannedMCs.length : parseInt(formData.qty, 10),
+                poId: selectedPO ? parseInt(selectedPO) : undefined,
+                dispatchPurpose: 'SALE',
+                specificMCNumbers: isScanMode && scannedMCs.length > 0 ? scannedMCs : undefined,
+                remarks: formData.remarks || undefined,
+            } : null;
+
+            const payload = isDispatch ? dispatchPayload : {
                 actionType: movementType,
                 ...formData,
                 qty: parseInt(formData.qty, 10),
-                specificMCNumbers: (isScanMode && movementType !== 'INWARD') ? scannedMCs : undefined,
+                allocationStrategy: movementType === 'TRANSFER' && transferMode === 'spec' ? allocationStrategy : undefined,
+                specificMCNumbers: (movementType === 'TRANSFER' && transferMode === 'batch' && selectedBatchIndex !== null)
+                    ? batchesList[selectedBatchIndex].mcNumbers
+                    : ((isScanMode && movementType !== 'INWARD') ? scannedMCs : undefined),
                 barcodes: (isScanMode && movementType === 'INWARD') ? scannedMCs : undefined,
-                dispatchPurpose: movementType === 'DISPATCH' ? dispatchPurpose : undefined,
-                poId: (movementType === 'DISPATCH' && dispatchPurpose === 'SALE' && selectedPO) ? parseInt(selectedPO) : undefined,
                 // Repacking specifics
                 originalMcNumbers: movementType === 'REPACK_IN' ? (formData as any).originalMcNumbers : undefined,
                 items: movementType === 'REPACK_IN'
@@ -571,11 +712,11 @@ export default function StockMovementPage() {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            ...payload,
+                            ...(payload ?? {}),
                             change_reason: formData.changeReason,
-                            qty_mcs: payload.qty,
-                            from_location: payload.fromStore,
-                            to_location: payload.toStore,
+                            qty_mcs: (payload as any)?.qty,
+                            from_location: (payload as any)?.fromStore,
+                            to_location: (payload as any)?.toStore,
                         }),
                     });
                 } else {
@@ -682,6 +823,26 @@ export default function StockMovementPage() {
             }
         } catch (err) {
             setToast({ type: 'error', message: 'Rejection failed' });
+        }
+    };
+
+    const handleCancelTransfer = async (id: string, status: string) => {
+        const confirmMsg = status === 'Pending Approval'
+            ? 'Cancel this pending transfer request?'
+            : 'Are you sure you want to cancel this completed transfer? This will reverse the carton stock back to the source store.';
+        
+        if (!confirm(confirmMsg)) return;
+        try {
+            const res = await fetch(`/api/movement/${id}/cancel`, { method: 'POST' });
+            const result = await res.json();
+            if (result.success) {
+                setToast({ type: 'success', message: 'Transfer cancelled successfully' });
+                refreshAllData();
+            } else {
+                setToast({ type: 'error', message: result.error });
+            }
+        } catch (err) {
+            setToast({ type: 'error', message: 'Cancellation failed' });
         }
     };
 
@@ -843,7 +1004,7 @@ export default function StockMovementPage() {
                                             {pendingRequests.map((req) => (
                                                 <TableRow key={req.id}>
                                                     <TableCell className="text-muted-foreground text-sm">
-                                                        {new Date(req.movement_datetime).toLocaleString()}
+                                                        {formatDisplayDateTime(req.movement_datetime)}
                                                     </TableCell>
                                                     <TableCell>
                                                         <Badge variant={req.status === 'In Transit' ? 'secondary' : (req.action_type === 'INWARD' ? 'success' : req.action_type === 'TRANSFER' ? 'info' : req.action_type === 'REPACK_OUT' ? 'warning' : 'info')}>
@@ -920,7 +1081,7 @@ export default function StockMovementPage() {
                                                     {req.status === 'In Transit' ? 'In Transit' : req.action_type.replace('_', ' ')}
                                                 </Badge>
                                                 <span className="text-muted-foreground text-xs">
-                                                    {new Date(req.movement_datetime).toLocaleDateString()}
+                                                    {formatDisplayDate(req.movement_datetime)}
                                                 </span>
                                             </div>
                                             <div>
@@ -997,6 +1158,16 @@ export default function StockMovementPage() {
                             >
                                 Operations
                             </Button>
+                            {settings['enable_location_mapping'] === 'true' && (
+                                <Button
+                                    variant={view === 'locator' ? 'default' : 'ghost'}
+                                    size="sm"
+                                    onClick={() => setView('locator')}
+                                    className="px-6"
+                                >
+                                    Stock Locator
+                                </Button>
+                            )}
                             <Button
                                 variant={view === 'reports' ? 'default' : 'ghost'}
                                 size="sm"
@@ -1008,7 +1179,7 @@ export default function StockMovementPage() {
                         </div>
                     </div>
 
-                    {view === 'operations' ? (
+                    {view === 'operations' && (
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             {/* Stock Position */}
                             <Card className="lg:col-span-1 border-border/50 bg-card/40 flex flex-col h-[500px]">
@@ -1144,7 +1315,7 @@ export default function StockMovementPage() {
                                                 {history.map((item) => (
                                                     <TableRow key={item.id}>
                                                         <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                                                            {new Date(item.movement_datetime).toLocaleDateString()}
+                                                            {formatDisplayDate(item.movement_datetime)}
                                                         </TableCell>
                                                         <TableCell>
                                                             <Badge variant={item.action_type === 'INWARD' ? 'success' : item.action_type === 'TRANSFER' ? 'info' : 'warning'}>
@@ -1199,6 +1370,17 @@ export default function StockMovementPage() {
                                                         </TableCell>
                                                         <TableCell>
                                                             <div className="flex items-center gap-1 justify-end">
+                                                                {user && (user.role === 'admin' || user.role === 'general_manager' || user.role === 'manager') && item.action_type === 'TRANSFER' && ['Pending Approval', 'In Transit'].includes(item.status) && (
+                                                                    <Button
+                                                                        onClick={() => handleCancelTransfer(item.movement_id, item.status)}
+                                                                        variant="ghost"
+                                                                        size="sm"
+                                                                        className="h-8 w-8 p-0"
+                                                                        title="Cancel Transfer"
+                                                                    >
+                                                                        <Ban size={14} className="text-rose-500" />
+                                                                    </Button>
+                                                                )}
                                                                 {user && (user.role === 'admin' || user.permissions?.includes('*') || user.permissions?.includes('transaction:update')) && ['INWARD', 'TRANSFER', 'DISPATCH'].includes(item.action_type) && item.status !== 'Rejected' && (
                                                                     <Button
                                                                         onClick={() => handleEdit(item)}
@@ -1219,6 +1401,17 @@ export default function StockMovementPage() {
                                                                         title="Print Carton Codes"
                                                                     >
                                                                         <ScanBarcode size={14} className="text-indigo-600" />
+                                                                    </Button>
+                                                                )}
+                                                                {settings['enable_location_mapping'] === 'true' && ['INWARD', 'REPACK_IN', 'TRANSFER'].includes(item.action_type) && item.status === 'Completed' && (
+                                                                    <Button
+                                                                        onClick={() => handlePrintMasterReport(item.movement_id)}
+                                                                        variant="ghost"
+                                                                        size="sm"
+                                                                        className="h-8 w-8 p-0"
+                                                                        title="Print Master Report"
+                                                                    >
+                                                                        <FileText size={14} className="text-emerald-600" />
                                                                     </Button>
                                                                 )}
                                                                 <Button
@@ -1250,7 +1443,7 @@ export default function StockMovementPage() {
                                                             {item.action_type}
                                                         </Badge>
                                                         <span className="text-muted-foreground text-xs">
-                                                            {new Date(item.movement_datetime).toLocaleDateString()}
+                                                            {formatDisplayDate(item.movement_datetime)}
                                                         </span>
                                                     </div>
                                                     <div>
@@ -1293,6 +1486,16 @@ export default function StockMovementPage() {
                                                         <span className="text-muted-foreground text-[10px]">Moved by: {item.moved_by_name}</span>
                                                     </div>
                                                     <div className="flex justify-end gap-2 pt-2 border-t border-border/40">
+                                                        {user && (user.role === 'admin' || user.role === 'general_manager' || user.role === 'manager') && item.action_type === 'TRANSFER' && ['Pending Approval', 'In Transit'].includes(item.status) && (
+                                                            <Button
+                                                                onClick={() => handleCancelTransfer(item.movement_id, item.status)}
+                                                                variant="outline"
+                                                                size="sm"
+                                                                className="h-8 flex-1 flex items-center justify-center gap-1 text-rose-600 border-rose-200 hover:bg-rose-50/50"
+                                                            >
+                                                                <Ban size={12} /> Cancel
+                                                            </Button>
+                                                        )}
                                                         {user && (user.role === 'admin' || user.permissions?.includes('*') || user.permissions?.includes('transaction:update')) && ['INWARD', 'TRANSFER', 'DISPATCH'].includes(item.action_type) && item.status !== 'Rejected' && (
                                                             <Button
                                                                 onClick={() => handleEdit(item)}
@@ -1313,6 +1516,16 @@ export default function StockMovementPage() {
                                                                 <ScanBarcode size={12} /> Print
                                                             </Button>
                                                         )}
+                                                        {settings['enable_location_mapping'] === 'true' && ['INWARD', 'REPACK_IN', 'TRANSFER'].includes(item.action_type) && item.status === 'Completed' && (
+                                                            <Button
+                                                                onClick={() => handlePrintMasterReport(item.movement_id)}
+                                                                variant="outline"
+                                                                size="sm"
+                                                                className="h-8 flex-1 flex items-center justify-center gap-1 text-emerald-600 border-emerald-200 hover:bg-emerald-50/50"
+                                                            >
+                                                                <FileText size={12} /> Master Report
+                                                            </Button>
+                                                        )}
                                                         <Button
                                                             onClick={() => handlePrintReceipt(item.movement_id)}
                                                             variant="outline"
@@ -1329,7 +1542,14 @@ export default function StockMovementPage() {
                                 </CardContent>
                             </Card>
                         </div>
-                    ) : (
+                    )}
+                    {view === 'locator' && (
+                        <StockLocatorView
+                            masterData={masterData}
+                            user={user}
+                        />
+                    )}
+                    {view === 'reports' && (
                         <StoreReportsView
                             filters={filters}
                             setFilters={setFilters}
@@ -1388,7 +1608,15 @@ export default function StockMovementPage() {
                                     ))}
                                 </div>
 
-                                <form id="movement-form" onSubmit={handleSubmit}>
+                                <form 
+                                    id="movement-form" 
+                                    onSubmit={handleSubmit}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                        }
+                                    }}
+                                >
                                     {/* STEP 1: SKU Configuration */}
                                     {wizardStep === 1 && (
                                         <div className="space-y-4 animate-in fade-in duration-200">
@@ -1457,6 +1685,129 @@ export default function StockMovementPage() {
                                                                 <span className="text-[10px] text-muted-foreground uppercase font-bold">Grade</span>
                                                                 <p className="text-sm font-semibold">{formData.grade}</p>
                                                             </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {/* DISPATCH Step 1: Select PO */}
+                                            {movementType === 'DISPATCH' && (
+                                                <div className="space-y-5 animate-in fade-in duration-200">
+                                                    <div className="space-y-2">
+                                                        <label className="text-sm font-medium">Purchase Order *</label>
+                                                        <Select
+                                                            value={selectedPO}
+                                                            onChange={(e) => handlePOChange(e.target.value)}
+                                                            className="h-10"
+                                                            required
+                                                        >
+                                                            <option value="">Select PO to dispatch...</option>
+                                                            {activePOs.map(po => (
+                                                                <option key={po.id} value={po.id}>
+                                                                    {po.po_number}{po.customer ? ` — ${po.customer}` : ''} [{po.branding_type || 'Demo'}] ({po.allocated_count || 0} MCs)
+                                                                </option>
+                                                            ))}
+                                                        </Select>
+                                                    </div>
+
+                                                    {selectedPODetails && (
+                                                        <div className="space-y-4 animate-in fade-in slide-in-from-top-1">
+                                                            {/* PO Info Cards */}
+                                                            <div className="grid grid-cols-3 gap-3">
+                                                                <div className="p-3 bg-muted/30 rounded-xl border border-border/40 text-center">
+                                                                    <div className="text-[10px] text-muted-foreground uppercase font-bold tracking-wide mb-1">Type</div>
+                                                                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                                                                        selectedPODetails.branding_type === 'Branded'
+                                                                            ? 'bg-violet-100 text-violet-700'
+                                                                            : 'bg-sky-100 text-sky-700'
+                                                                    }`}>
+                                                                        {selectedPODetails.branding_type || 'Demo'}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="p-3 bg-muted/30 rounded-xl border border-border/40 text-center">
+                                                                    <div className="text-[10px] text-muted-foreground uppercase font-bold tracking-wide mb-1">Cartons</div>
+                                                                    <div className="text-lg font-bold text-emerald-600">{selectedPODetails.allocated_count || 0}</div>
+                                                                </div>
+                                                                <div className="p-3 bg-muted/30 rounded-xl border border-border/40 text-center">
+                                                                    <div className="text-[10px] text-muted-foreground uppercase font-bold tracking-wide mb-1">Status</div>
+                                                                    <div className="text-xs font-semibold text-foreground">{selectedPODetails.status}</div>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Dispatch status warning for Branded POs */}
+                                                            {selectedPODetails.branding_type === 'Branded' && (
+                                                                <div className="p-3 bg-violet-500/10 border border-violet-500/20 rounded-lg text-xs text-violet-700">
+                                                                    <strong>Branded PO:</strong> Only repacked (Allocated) cartons will be dispatched. Ensure Repack In is completed first.
+                                                                </div>
+                                                            )}
+                                                            {(!selectedPODetails.branding_type || selectedPODetails.branding_type === 'Demo') && (
+                                                                <div className="p-3 bg-sky-500/10 border border-sky-500/20 rounded-lg text-xs text-sky-700">
+                                                                    <strong>Demo PO:</strong> Reserved cartons will be directly dispatched.
+                                                                </div>
+                                                            )}
+
+                                                            {/* From Store: auto-populated from loading_store or manual */}
+                                                            <div className="space-y-2">
+                                                                <label className="text-sm font-medium">Loading / Dispatch Store *</label>
+                                                                <Select
+                                                                    value={formData.fromStore}
+                                                                    onChange={(e) => {
+                                                                        const val = e.target.value;
+                                                                        setFormData(prev => ({ ...prev, fromStore: val }));
+                                                                        if (selectedPO) {
+                                                                            fetchPOStockItems(selectedPO, val);
+                                                                        }
+                                                                    }}
+                                                                    required
+                                                                    className="h-10"
+                                                                >
+                                                                    <option value="">Select store...</option>
+                                                                    {allStores.map(s => (
+                                                                        <option key={s} value={s}>{s}{selectedPODetails.loading_store === s ? ' ★' : ''}</option>
+                                                                    ))}
+                                                                </Select>
+                                                                {selectedPODetails.loading_store && (
+                                                                    <p className="text-xs text-muted-foreground">Loading store from PO: <strong>{selectedPODetails.loading_store}</strong></p>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Destination */}
+                                                            <div className="space-y-2">
+                                                                <label className="text-sm font-medium">Client / Destination *</label>
+                                                                <Input
+                                                                    value={formData.toStore}
+                                                                    onChange={(e) => setFormData({ ...formData, toStore: e.target.value })}
+                                                                    placeholder="Client name or destination"
+                                                                    required
+                                                                    className="h-10"
+                                                                />
+                                                            </div>
+
+                                                            {/* Remarks */}
+                                                            <div className="space-y-2">
+                                                                <label className="text-sm font-medium text-muted-foreground">Remarks (Optional)</label>
+                                                                <Input
+                                                                    value={formData.remarks}
+                                                                    onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
+                                                                    placeholder="Add notes about this dispatch..."
+                                                                    className="h-10"
+                                                                />
+                                                            </div>
+
+                                                            {/* PO Stock Preview */}
+                                                            {fetchingPoStock && (
+                                                                <div className="text-center py-4 text-sm text-muted-foreground animate-pulse">Loading cartons...</div>
+                                                            )}
+                                                            {!fetchingPoStock && dispatchPoStock.length > 0 && (
+                                                                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-xs text-emerald-700 font-medium">
+                                                                    ✓ {dispatchPoStock.length} carton(s) ready for dispatch from {formData.fromStore || 'selected store'}
+                                                                </div>
+                                                            )}
+                                                            {!fetchingPoStock && formData.fromStore && dispatchPoStock.length === 0 && (
+                                                                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-700">
+                                                                    ⚠ No {selectedPODetails.branding_type === 'Branded' ? 'Allocated' : 'Reserved'} cartons found for this PO in <strong>{formData.fromStore}</strong>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </div>
@@ -1536,8 +1887,8 @@ export default function StockMovementPage() {
                                                 </div>
                                             )}
 
-                                            {movementType !== 'REPACK_OUT' && movementType !== 'REPACK_IN' && (() => {
-                                                const isStockMode = movementType === 'TRANSFER' || movementType === 'DISPATCH';
+                                            {movementType !== 'REPACK_OUT' && movementType !== 'REPACK_IN' && movementType !== 'DISPATCH' && (() => {
+                                                const isStockMode = movementType === 'TRANSFER';
                                                 const currentTypes = isStockMode ? (stockFilters?.types || []) : (masterData?.types || []);
                                                 const currentVarieties = isStockMode ? (stockFilters?.varieties || []) : (masterData?.varieties || []);
                                                 const currentPackings = isStockMode ? (stockFilters?.packings || []) : (masterData?.packings || []);
@@ -1606,94 +1957,246 @@ export default function StockMovementPage() {
                                                             </div>
                                                         )}
 
+                                                        {movementType === 'TRANSFER' && (
+                                                            <div className="flex bg-muted/45 p-1 rounded-xl border border-border/40 mb-3">
+                                                                <button
+                                                                    type="button"
+                                                                    className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all duration-200 ${
+                                                                        transferMode === 'spec'
+                                                                            ? 'bg-indigo-600 text-white shadow-md border border-indigo-700 dark:border-indigo-500'
+                                                                            : 'text-muted-foreground hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-500/5'
+                                                                    }`}
+                                                                    onClick={() => {
+                                                                        setTransferMode('spec');
+                                                                        setSelectedBatchIndex(null);
+                                                                        setFormData(prev => ({
+                                                                            ...prev,
+                                                                            type: '',
+                                                                            variety: '',
+                                                                            packing: '',
+                                                                            grade: '',
+                                                                            qty: ''
+                                                                        }));
+                                                                    }}
+                                                                >
+                                                                    Transfer by SKU Specs
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all duration-200 ${
+                                                                        transferMode === 'batch'
+                                                                            ? 'bg-indigo-600 text-white shadow-md border border-indigo-700 dark:border-indigo-500'
+                                                                            : 'text-muted-foreground hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-500/5'
+                                                                    }`}
+                                                                    onClick={() => {
+                                                                        setTransferMode('batch');
+                                                                        setSelectedBatchIndex(null);
+                                                                        setFormData(prev => ({
+                                                                            ...prev,
+                                                                            type: '',
+                                                                            variety: '',
+                                                                            packing: '',
+                                                                            grade: '',
+                                                                            qty: ''
+                                                                        }));
+                                                                    }}
+                                                                >
+                                                                    Transfer Entire Batch (Date-Based)
+                                                                </button>
+                                                            </div>
+                                                        )}
+
                                                         {isStockMode && !formData.fromStore && (
                                                             <div className="text-xs text-amber-600 bg-amber-500/10 border border-amber-500/20 p-3 rounded-lg">
-                                                                Please select a source store above to filter and display available SKU specifications.
+                                                                {transferMode === 'batch'
+                                                                    ? 'Please select a source store above to search available batches.'
+                                                                    : 'Please select a source store above to filter and display available SKU specifications.'}
                                                             </div>
                                                         )}
 
-                                                        {isStockMode && formData.fromStore && currentTypes.length === 0 && !loadingStockFilters && (
-                                                            <div className="text-xs text-red-600 bg-red-500/10 border border-red-500/20 p-3 rounded-lg">
-                                                                No available stock found in the selected store.
+                                                        {transferMode === 'batch' && movementType === 'TRANSFER' && formData.fromStore && (
+                                                            <div className="space-y-4 animate-in fade-in duration-200">
+                                                                <div className="space-y-2">
+                                                                    <label className="text-sm font-medium text-foreground">Packing Date *</label>
+                                                                    <Input
+                                                                        type="date"
+                                                                        value={batchDate}
+                                                                        onChange={(e) => {
+                                                                            setBatchDate(e.target.value);
+                                                                            setSelectedBatchIndex(null);
+                                                                            setFormData(prev => ({
+                                                                                ...prev,
+                                                                                type: '',
+                                                                                variety: '',
+                                                                                packing: '',
+                                                                                grade: '',
+                                                                                qty: ''
+                                                                            }));
+                                                                        }}
+                                                                        required
+                                                                        className="h-10 bg-background"
+                                                                    />
+                                                                </div>
+
+                                                                {batchDate && (
+                                                                    <div className="space-y-3 pt-2">
+                                                                        <label className="text-sm font-medium text-foreground flex justify-between items-center">
+                                                                            <span>Select Batch to Transfer *</span>
+                                                                            {!loadingBatches && batchesList.length > 0 && (
+                                                                                <span className="text-xs text-muted-foreground font-normal">
+                                                                                    {batchesList.length} batches available
+                                                                                </span>
+                                                                            )}
+                                                                        </label>
+                                                                        {loadingBatches ? (
+                                                                            <div className="text-center py-6 text-xs text-muted-foreground animate-pulse">
+                                                                                Loading batches...
+                                                                            </div>
+                                                                        ) : batchesList.length === 0 ? (
+                                                                            <div className="text-xs text-center py-6 bg-amber-500/10 border border-amber-500/20 text-amber-600 rounded-lg">
+                                                                                No available batches found for {batchDate} at {formData.fromStore}
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div className="grid grid-cols-1 gap-2.5 max-h-[260px] overflow-y-auto pr-1">
+                                                                                {batchesList.map((batch, index) => {
+                                                                                    const isSelected = selectedBatchIndex === index;
+                                                                                    return (
+                                                                                        <div
+                                                                                            key={index}
+                                                                                            onClick={() => {
+                                                                                                setSelectedBatchIndex(index);
+                                                                                                setFormData(prev => ({
+                                                                                                    ...prev,
+                                                                                                    type: batch.type,
+                                                                                                    variety: batch.variety,
+                                                                                                    packing: batch.packing,
+                                                                                                    grade: batch.grade,
+                                                                                                    qty: batch.qty.toString()
+                                                                                                }));
+                                                                                            }}
+                                                                                            className={`p-3.5 rounded-xl border text-xs cursor-pointer transition-all duration-200 flex flex-col gap-2 ${
+                                                                                                isSelected
+                                                                                                    ? 'bg-indigo-500/10 border-indigo-600 shadow-sm ring-1 ring-indigo-600'
+                                                                                                    : 'bg-card border-border hover:bg-muted/40 hover:border-muted-foreground/30'
+                                                                                            }`}
+                                                                                        >
+                                                                                            <div className="flex justify-between items-start">
+                                                                                                <div>
+                                                                                                    <span className="font-bold text-indigo-950 text-sm">{batch.type}</span>
+                                                                                                    <span className="text-muted-foreground mx-1.5">•</span>
+                                                                                                    <span className="font-medium text-muted-foreground">{batch.variety}</span>
+                                                                                                </div>
+                                                                                                <Badge className="bg-indigo-600 text-white font-semibold">
+                                                                                                    {batch.qty} MCs
+                                                                                                </Badge>
+                                                                                            </div>
+                                                                                            <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
+                                                                                                <div>
+                                                                                                    Packing: <span className="font-semibold text-foreground">{batch.packing}</span>
+                                                                                                </div>
+                                                                                                <div>
+                                                                                                    Grade: <span className="font-semibold text-foreground">{batch.grade}</span>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                            <div className="text-[10px] text-muted-foreground font-mono bg-muted/50 p-1.5 rounded border border-border/30 truncate">
+                                                                                                Cartons: {batch.mcNumbers.join(', ')}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         )}
 
-                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                                            <div className="space-y-2">
-                                                                <label className="text-sm font-medium">Type *</label>
-                                                                <Select
-                                                                    value={formData.type}
-                                                                    onChange={(e) => setFormData({ ...formData, type: e.target.value, variety: '', packing: '', grade: '' })}
-                                                                    required
-                                                                    disabled={isSKUDisabled}
-                                                                    className="h-10"
-                                                                >
-                                                                    {loadingStockFilters ? (
-                                                                        <option value="">Loading...</option>
-                                                                    ) : (
-                                                                        <>
-                                                                            <option value="">Select Type...</option>
-                                                                            {currentTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                                                                        </>
-                                                                    )}
-                                                                </Select>
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                <label className="text-sm font-medium">Variety *</label>
-                                                                <Select
-                                                                    value={formData.variety}
-                                                                    onChange={(e) => setFormData({ ...formData, variety: e.target.value, packing: '', grade: '' })}
-                                                                    required
-                                                                    disabled={isSKUDisabled}
-                                                                    className="h-10"
-                                                                >
-                                                                    <option value="">Select Variety...</option>
-                                                                    {currentVarieties.map(v => <option key={v} value={v}>{v}</option>)}
-                                                                </Select>
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                <label className="text-sm font-medium">Packing Size *</label>
-                                                                <Select
-                                                                    value={formData.packing}
-                                                                    onChange={(e) => setFormData({ ...formData, packing: e.target.value, grade: '' })}
-                                                                    required
-                                                                    disabled={isSKUDisabled}
-                                                                    className="h-10"
-                                                                >
-                                                                    <option value="">Select Packing...</option>
-                                                                    {currentPackings.map(p => <option key={p} value={p}>{p}</option>)}
-                                                                </Select>
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                <label className="text-sm font-medium">Grade *</label>
-                                                                <Select
-                                                                    value={formData.grade}
-                                                                    onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
-                                                                    required
-                                                                    disabled={isSKUDisabled}
-                                                                    className="h-10"
-                                                                >
-                                                                    <option value="">Select Grade...</option>
-                                                                    {currentGrades.map(g => <option key={g} value={g}>{g}</option>)}
-                                                                </Select>
-                                                            </div>
-                                                        </div>
+                                                        {(transferMode === 'spec' || movementType !== 'TRANSFER') && (
+                                                            <>
+                                                                {isStockMode && formData.fromStore && currentTypes.length === 0 && !loadingStockFilters && (
+                                                                    <div className="text-xs text-red-600 bg-red-500/10 border border-red-500/20 p-3 rounded-lg">
+                                                                        No available stock found in the selected store.
+                                                                    </div>
+                                                                )}
 
-                                                        {isStockMode && formData.fromStore && formData.type && formData.variety && formData.packing && formData.grade && (
-                                                            <div className="mt-4 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex items-center justify-between animate-in fade-in duration-200">
-                                                                <div className="flex items-center gap-2">
-                                                                    <Layers className="text-indigo-600 h-5 w-5" />
-                                                                    <div>
-                                                                        <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Current Available Stock</div>
-                                                                        <div className="text-sm font-bold text-indigo-950 mt-0.5">
-                                                                            {fetchingStockItems ? 'Loading...' : `${availableStockItems.length} Master Cartons (MCs)`}
-                                                                        </div>
+                                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                                    <div className="space-y-2">
+                                                                        <label className="text-sm font-medium">Type *</label>
+                                                                        <Select
+                                                                            value={formData.type}
+                                                                            onChange={(e) => setFormData({ ...formData, type: e.target.value, variety: '', packing: '', grade: '' })}
+                                                                            required
+                                                                            disabled={isSKUDisabled}
+                                                                            className="h-10"
+                                                                        >
+                                                                            {loadingStockFilters ? (
+                                                                                <option value="">Loading...</option>
+                                                                            ) : (
+                                                                                <>
+                                                                                    <option value="">Select Type...</option>
+                                                                                    {currentTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                                                                                </>
+                                                                            )}
+                                                                        </Select>
+                                                                    </div>
+                                                                    <div className="space-y-2">
+                                                                        <label className="text-sm font-medium">Variety *</label>
+                                                                        <Select
+                                                                            value={formData.variety}
+                                                                            onChange={(e) => setFormData({ ...formData, variety: e.target.value, packing: '', grade: '' })}
+                                                                            required
+                                                                            disabled={isSKUDisabled}
+                                                                            className="h-10"
+                                                                        >
+                                                                            <option value="">Select Variety...</option>
+                                                                            {currentVarieties.map(v => <option key={v} value={v}>{v}</option>)}
+                                                                        </Select>
+                                                                    </div>
+                                                                    <div className="space-y-2">
+                                                                        <label className="text-sm font-medium">Packing Size *</label>
+                                                                        <Select
+                                                                            value={formData.packing}
+                                                                            onChange={(e) => setFormData({ ...formData, packing: e.target.value, grade: '' })}
+                                                                            required
+                                                                            disabled={isSKUDisabled}
+                                                                            className="h-10"
+                                                                        >
+                                                                            <option value="">Select Packing...</option>
+                                                                            {currentPackings.map(p => <option key={p} value={p}>{p}</option>)}
+                                                                        </Select>
+                                                                    </div>
+                                                                    <div className="space-y-2">
+                                                                        <label className="text-sm font-medium">Grade *</label>
+                                                                        <Select
+                                                                            value={formData.grade}
+                                                                            onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
+                                                                            required
+                                                                            disabled={isSKUDisabled}
+                                                                            className="h-10"
+                                                                        >
+                                                                            <option value="">Select Grade...</option>
+                                                                            {currentGrades.map(g => <option key={g} value={g}>{g}</option>)}
+                                                                        </Select>
                                                                     </div>
                                                                 </div>
-                                                                <Badge className="bg-indigo-600 text-white font-mono">
-                                                                    {fetchingStockItems ? '...' : `${availableStockItems.length} MCs`}
-                                                                </Badge>
-                                                            </div>
+
+                                                                {isStockMode && formData.fromStore && formData.type && formData.variety && formData.packing && formData.grade && (
+                                                                    <div className="mt-4 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex items-center justify-between animate-in fade-in duration-200">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <Layers className="text-indigo-600 h-5 w-5" />
+                                                                            <div>
+                                                                                <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Current Available Stock</div>
+                                                                                <div className="text-sm font-bold text-indigo-950 mt-0.5">
+                                                                                    {fetchingStockItems ? 'Loading...' : `${availableStockItems.length} Master Cartons (MCs)`}
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                        <Badge className="bg-indigo-600 text-white font-mono">
+                                                                            {fetchingStockItems ? '...' : `${availableStockItems.length} MCs`}
+                                                                        </Badge>
+                                                                    </div>
+                                                                )}
+                                                            </>
                                                         )}
                                                     </div>
                                                 );
@@ -1701,13 +2204,13 @@ export default function StockMovementPage() {
                                         </div>
                                     )}
 
-                                    {/* STEP 2: Locations & Movement Flow */}
-                                    {wizardStep === 2 && movementType !== 'INWARD' && (
+                                    {/* STEP 2: Locations & Movement Flow (non-DISPATCH) */}
+                                    {wizardStep === 2 && movementType !== 'INWARD' && movementType !== 'DISPATCH' && (
                                         <div className="space-y-4 animate-in fade-in duration-200">
                                             <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">Step 2: Operations & Locations</h3>
 
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                                {(movementType === 'TRANSFER' || movementType === 'DISPATCH' || movementType === 'REPACK_OUT') && (
+                                                {movementType === 'REPACK_OUT' && (
                                                     <div className="space-y-2">
                                                         <label className="text-sm font-medium">From Store *</label>
                                                         <Select
@@ -1742,83 +2245,52 @@ export default function StockMovementPage() {
                                                         </Select>
                                                     </div>
                                                 )}
-
-                                                {movementType === 'DISPATCH' && (
-                                                    <div className="col-span-2 space-y-4 border p-4 rounded-xl bg-amber-500/5 border-amber-500/10">
-                                                        <div className="flex flex-col sm:flex-row gap-4 items-start">
-                                                            <div className="space-y-1 w-full sm:w-[180px] shrink-0">
-                                                                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Dispatch Purpose</label>
-                                                                <div className="flex flex-col gap-2 mt-1">
-                                                                    <label className="flex items-center gap-2 cursor-pointer bg-white/60 p-2 rounded-lg border hover:bg-white transition-colors border-orange-100/50">
-                                                                        <input
-                                                                            type="radio"
-                                                                            name="purpose"
-                                                                            checked={dispatchPurpose === 'SALE'}
-                                                                            onChange={() => {
-                                                                                setDispatchPurpose('SALE');
-                                                                                setFormData(p => ({ ...p, toStore: '' }));
-                                                                            }}
-                                                                            className="accent-amber-600 w-4 h-4"
-                                                                        />
-                                                                        <span className="text-sm font-medium">Sale/Order</span>
-                                                                    </label>
-                                                                    <label className="flex items-center gap-2 cursor-pointer bg-white/60 p-2 rounded-lg border hover:bg-white transition-colors border-orange-100/50">
-                                                                        <input
-                                                                            type="radio"
-                                                                            name="purpose"
-                                                                            checked={dispatchPurpose === 'REPACKING'}
-                                                                            onChange={() => {
-                                                                                setDispatchPurpose('REPACKING');
-                                                                                setFormData(p => ({ ...p, toStore: 'Repacking Unit' }));
-                                                                            }}
-                                                                            className="accent-amber-600 w-4 h-4"
-                                                                        />
-                                                                        <span className="text-sm font-medium">Repacking</span>
-                                                                    </label>
-                                                                </div>
-                                                            </div>
-
-                                                            <div className="space-y-3 flex-1 w-full">
-                                                                {dispatchPurpose === 'SALE' && (
-                                                                    <div className="space-y-1 animate-in fade-in slide-in-from-top-1">
-                                                                        <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Link PO (Optional)</label>
-                                                                        <Select
-                                                                            value={selectedPO}
-                                                                            onChange={(e) => {
-                                                                                const pid = e.target.value;
-                                                                                setSelectedPO(pid);
-                                                                                const po = activePOs.find(p => p.id.toString() === pid);
-                                                                                if (po && po.customer) {
-                                                                                    setFormData(prev => ({ ...prev, toStore: po.customer }));
-                                                                                }
-                                                                            }}
-                                                                            className="h-10 bg-white"
-                                                                        >
-                                                                            <option value="">Select PO...</option>
-                                                                            {activePOs.map(po => (
-                                                                                <option key={po.id} value={po.id}>{po.po_number} - {po.customer}</option>
-                                                                            ))}
-                                                                        </Select>
-                                                                    </div>
-                                                                )}
-                                                                <div className="space-y-1">
-                                                                    <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground font-bold">
-                                                                        {dispatchPurpose === 'SALE' ? 'Client / Dest. *' : 'Destination'}
-                                                                    </label>
-                                                                    <Input
-                                                                        value={formData.toStore}
-                                                                        onChange={(e) => setFormData({ ...formData, toStore: e.target.value })}
-                                                                        placeholder={dispatchPurpose === 'SALE' ? "Client Name" : "Repacking Unit"}
-                                                                        required
-                                                                        readOnly={dispatchPurpose === 'REPACKING'}
-                                                                        className={`h-10 ${dispatchPurpose === 'REPACKING' ? 'bg-muted' : 'bg-white'}`}
-                                                                    />
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                )}
                                             </div>
+                                            {movementType === 'TRANSFER' && transferMode === 'spec' && (
+                                                <div className="space-y-3 p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-xl">
+                                                    <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Allocation Strategy</label>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                        <label
+                                                            className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all duration-200 ${
+                                                                allocationStrategy === 'FIFO'
+                                                                    ? 'bg-white border-indigo-600 shadow-sm ring-1 ring-indigo-600'
+                                                                    : 'bg-white/60 border-border hover:bg-white'
+                                                            }`}
+                                                        >
+                                                            <input
+                                                                type="radio"
+                                                                name="allocationStrategy"
+                                                                checked={allocationStrategy === 'FIFO'}
+                                                                onChange={() => setAllocationStrategy('FIFO')}
+                                                                className="accent-indigo-600 w-4 h-4 mt-0.5"
+                                                            />
+                                                            <div>
+                                                                <span className="text-sm font-semibold text-foreground block">FIFO (First In, First Out)</span>
+                                                                <span className="text-xs text-muted-foreground mt-0.5 block">Transfer oldest stock first. Best for ensuring standard rotation.</span>
+                                                            </div>
+                                                        </label>
+                                                        <label
+                                                            className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all duration-200 ${
+                                                                allocationStrategy === 'LIFO'
+                                                                    ? 'bg-white border-indigo-600 shadow-sm ring-1 ring-indigo-600'
+                                                                    : 'bg-white/60 border-border hover:bg-white'
+                                                            }`}
+                                                        >
+                                                            <input
+                                                                type="radio"
+                                                                name="allocationStrategy"
+                                                                checked={allocationStrategy === 'LIFO'}
+                                                                onChange={() => setAllocationStrategy('LIFO')}
+                                                                className="accent-indigo-600 w-4 h-4 mt-0.5"
+                                                            />
+                                                            <div>
+                                                                <span className="text-sm font-semibold text-foreground block">LIFO (Last In, First Out)</span>
+                                                                <span className="text-xs text-muted-foreground mt-0.5 block">Transfer newest stock first. Best for temporary/storage purposes.</span>
+                                                            </div>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            )}
 
                                             <div className="space-y-2">
                                                 <label className="text-sm font-medium">Remarks</label>
@@ -1833,6 +2305,103 @@ export default function StockMovementPage() {
                                         </div>
                                     )}
 
+                                    {/* STEP 2: DISPATCH - Carton Verification */}
+                                    {wizardStep === 2 && movementType === 'DISPATCH' && (
+                                        <div className="space-y-4 animate-in fade-in duration-200">
+                                            <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">Step 2: Verify &amp; Dispatch</h3>
+
+                                            {/* PO Summary */}
+                                            <div className="p-4 rounded-xl bg-amber-500/5 border border-amber-500/15 flex flex-wrap gap-4 items-start">
+                                                <div className="min-w-0">
+                                                    <div className="text-xs text-muted-foreground uppercase font-bold tracking-wider">PO</div>
+                                                    <div className="font-bold text-base mt-0.5">{selectedPODetails?.po_number || activePOs.find(p => p.id.toString() === selectedPO)?.po_number}</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs text-muted-foreground uppercase font-bold tracking-wider">To</div>
+                                                    <div className="font-semibold mt-0.5">{formData.toStore}</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs text-muted-foreground uppercase font-bold tracking-wider">From</div>
+                                                    <div className="font-semibold mt-0.5">{formData.fromStore}</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Available</div>
+                                                    <div className="font-bold text-emerald-600 mt-0.5">{dispatchPoStock.length} MCs</div>
+                                                </div>
+                                            </div>
+
+                                            {/* Quantity or Scan Mode */}
+                                            {!isScanMode ? (
+                                                <div className="space-y-2">
+                                                    <label className="text-sm font-medium">Dispatch Quantity (MCs) *</label>
+                                                    <div className="flex gap-2">
+                                                        <Input
+                                                            type="number"
+                                                            value={formData.qty}
+                                                            onChange={(e) => setFormData({ ...formData, qty: e.target.value })}
+                                                            min="1"
+                                                            max={dispatchPoStock.length}
+                                                            placeholder={`Max: ${dispatchPoStock.length}`}
+                                                            required
+                                                            className="h-10 flex-1"
+                                                        />
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            className="h-10 text-xs"
+                                                            onClick={() => setFormData(prev => ({ ...prev, qty: dispatchPoStock.length.toString() }))}
+                                                        >
+                                                            All ({dispatchPoStock.length})
+                                                        </Button>
+                                                    </div>
+                                                    <p className="text-xs text-muted-foreground">FIFO: Oldest cartons dispatched first</p>
+                                                </div>
+                                            ) : (
+                                                <div className="p-3 bg-muted/30 border border-border/40 rounded-lg text-xs text-muted-foreground">
+                                                    Scan mode: Scanned {scannedMCs.length} of {dispatchPoStock.length} MCs
+                                                </div>
+                                            )}
+
+                                            {/* Carton list preview */}
+                                            {dispatchPoStock.length > 0 && (
+                                                <div className="space-y-2">
+                                                    <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{dispatchPoStock.length} Cartons to dispatch</label>
+                                                    <div className="border border-border/40 rounded-xl overflow-hidden max-h-[250px] overflow-y-auto">
+                                                        <table className="w-full text-xs">
+                                                            <thead className="bg-muted/50 sticky top-0">
+                                                                <tr>
+                                                                    <th className="p-2 text-left font-semibold">MC#</th>
+                                                                    <th className="p-2 text-left font-semibold">Barcode</th>
+                                                                    <th className="p-2 text-left font-semibold">Store/Section</th>
+                                                                    <th className="p-2 text-left font-semibold">Date</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {dispatchPoStock.map((mc, idx) => (
+                                                                    <tr key={mc.id} className={`border-t border-border/30 ${idx % 2 === 0 ? 'bg-background' : 'bg-muted/10'}`}>
+                                                                        <td className="p-2 font-mono font-bold">{mc.mc_number}</td>
+                                                                        <td className="p-2 text-muted-foreground">{mc.barcode || mc.short_code || '—'}</td>
+                                                                        <td className="p-2">{mc.cold_store}{mc.section_name ? <span className="text-muted-foreground"> · {mc.section_name}</span> : ''}</td>
+                                                                        <td className="p-2 text-muted-foreground">{formatDisplayDate(mc.packing_date)}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {dispatchPoStock.length === 0 && (
+                                                <div className="p-6 text-center border border-dashed border-amber-500/30 rounded-xl bg-amber-500/5">
+                                                    <p className="text-sm text-amber-700 font-medium">No cartons ready for dispatch</p>
+                                                    <p className="text-xs text-amber-600 mt-1">Check that cartons are {selectedPODetails?.branding_type === 'Branded' ? 'Allocated (Repacked)' : 'Reserved'} for this PO in {formData.fromStore}</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+
+
                                     {/* STEP 3 / Quantity Confirmation: Verification & Stock Confirmation */}
                                     {((movementType === 'INWARD' && wizardStep === 2) || (movementType !== 'INWARD' && wizardStep === 3)) && (
                                         <div className="space-y-4 animate-in fade-in duration-200">
@@ -1840,7 +2409,7 @@ export default function StockMovementPage() {
                                                 {movementType === 'INWARD' ? 'Step 2: Confirm Quantity' : 'Step 3: Verification & Carton Selection'}
                                             </h3>
 
-                                            {movementType !== 'INWARD' && (
+                                            {movementType !== 'INWARD' && transferMode !== 'batch' && (
                                                 <div className="flex items-center gap-3 p-3 bg-muted/40 border rounded-xl">
                                                     <Button
                                                         type="button"
@@ -1868,7 +2437,7 @@ export default function StockMovementPage() {
                                                 </div>
                                             )}
 
-                                            {(movementType === 'INWARD' || !isScanMode) && (() => {
+                                            {(movementType === 'INWARD' || (!isScanMode && transferMode !== 'batch')) && (() => {
                                                 const isStockBased = ['TRANSFER', 'DISPATCH', 'REPACK_OUT'].includes(movementType);
                                                 const isExceeded = isStockBased && Number(formData.qty) > availableStockItems.length;
                                                 return (
@@ -1900,7 +2469,7 @@ export default function StockMovementPage() {
                                                 );
                                             })()}
 
-                                            {movementType !== 'INWARD' && isScanMode && (
+                                            {movementType !== 'INWARD' && isScanMode && transferMode !== 'batch' && (
                                                 <div className="border rounded-xl p-4 bg-muted/20 flex flex-col h-[320px]">
                                                     <h4 className="font-semibold text-xs mb-3 flex items-center gap-2 text-foreground">
                                                         <ScanBarcode size={14} className="text-indigo-600" /> 
@@ -2004,7 +2573,51 @@ export default function StockMovementPage() {
                                                 </div>
                                             )}
 
-
+                                            {movementType === 'TRANSFER' && transferMode === 'batch' && selectedBatchIndex !== null && batchesList[selectedBatchIndex] && (
+                                                <div className="space-y-4 animate-in fade-in duration-200">
+                                                    <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-4 space-y-3">
+                                                        <div className="flex justify-between items-center border-b pb-2 border-border/40">
+                                                            <span className="font-semibold text-foreground text-sm">Selected Batch Summary</span>
+                                                            <Badge className="bg-indigo-600 text-white font-semibold">
+                                                                {batchesList[selectedBatchIndex].qty} MCs
+                                                            </Badge>
+                                                        </div>
+                                                        <div className="grid grid-cols-2 gap-3 text-xs">
+                                                            <div>
+                                                                <span className="text-muted-foreground block">Product Type</span>
+                                                                <span className="font-semibold text-indigo-950 mt-0.5 block">{batchesList[selectedBatchIndex].type}</span>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-muted-foreground block">Variety</span>
+                                                                <span className="font-semibold text-indigo-950 mt-0.5 block">{batchesList[selectedBatchIndex].variety}</span>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-muted-foreground block">Packing Size</span>
+                                                                <span className="font-semibold text-indigo-950 mt-0.5 block">{batchesList[selectedBatchIndex].packing}</span>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-muted-foreground block">Grade</span>
+                                                                <span className="font-semibold text-indigo-950 mt-0.5 block">{batchesList[selectedBatchIndex].grade}</span>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-muted-foreground block">Packing Date</span>
+                                                                <span className="font-semibold text-indigo-950 mt-0.5 block">{formatDisplayDate(batchDate)}</span>
+                                                            </div>
+                                                        </div>
+                                                        <div className="space-y-1.5 pt-2">
+                                                            <span className="text-xs font-semibold text-muted-foreground block">Master Carton Numbers ({batchesList[selectedBatchIndex].mcNumbers.length})</span>
+                                                            <div className="max-h-[120px] overflow-y-auto bg-background/50 border rounded-lg p-2.5 space-y-1 text-xs font-mono">
+                                                                {batchesList[selectedBatchIndex].mcNumbers.map((mc: string) => (
+                                                                    <div key={mc} className="flex justify-between items-center py-1 border-b border-border/10 last:border-0">
+                                                                        <span className="font-bold text-foreground">{mc}</span>
+                                                                        <span className="text-[10px] text-muted-foreground">Ready for Transfer</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
 
                                             {isEditMode && editingRequestStatus !== 'Pending Approval' && (
                                                 <div className="space-y-2 border border-red-500/20 bg-red-500/5 p-4 rounded-xl animate-in fade-in duration-200">
@@ -2036,8 +2649,9 @@ export default function StockMovementPage() {
                                         <Button type="button" onClick={() => setShowModal(false)} variant="secondary" className="h-10">
                                             Cancel
                                         </Button>
-                                        {wizardStep < maxSteps ? (
+                                        {wizardStep < maxSteps && (
                                             <Button
+                                                key="next-btn"
                                                 type="button"
                                                 onClick={() => setWizardStep(wizardStep + 1)}
                                                 disabled={!isStepValid(wizardStep)}
@@ -2045,8 +2659,10 @@ export default function StockMovementPage() {
                                             >
                                                 Next
                                             </Button>
-                                        ) : (
+                                        )}
+                                        {wizardStep >= maxSteps && (
                                             <Button
+                                                key="submit-btn"
                                                 type="submit"
                                                 form="movement-form"
                                                 disabled={submitting || (isScanMode && scannedMCs.length === 0)}
@@ -2208,14 +2824,14 @@ function StoreReportsView({
     const handleExportPerformance = () => {
         const headers = ['Store', 'Sent (Out MCs)', 'Received (In MCs)', 'Current Balance (MCs)'];
         const rows = perfData.map(r => [r.store, r.sent, r.received, r.balance]);
-        exportToCSV(`store_movement_performance_${new Date().toISOString().split('T')[0]}.csv`, headers, rows);
+        exportToCSV(`store_movement_performance_${formatDisplayDate(new Date())}.csv`, headers, rows);
     };
 
     const handleExportLedger = () => {
         if (!ledgerData) return;
         const headers = ['Date', 'Movement ID', 'Action Type', 'From Store', 'To Store', 'Variety', 'Grade', 'Packing', 'Change (MCs)', 'Running Balance (MCs)', 'Remarks'];
         const rows = ledgerData.entries.map((r: any) => [
-            new Date(r.datetime).toLocaleDateString(),
+            formatDisplayDate(r.datetime),
             r.movementId,
             r.actionType,
             r.fromLocation || 'N/A',
@@ -2234,14 +2850,14 @@ function StoreReportsView({
             ['Starting Balance', ledgerData.startingBalance],
             ['Ending Balance', ledgerData.endingBalance],
         ];
-        exportToCSV(`stock_ledger_${ledgerStore}_${new Date().toISOString().split('T')[0]}.csv`, headers, rows, metadata);
+        exportToCSV(`stock_ledger_${ledgerStore}_${formatDisplayDate(new Date())}.csv`, headers, rows, metadata);
     };
 
     const handleExportYield = () => {
         const headers = ['Job ID', 'Date', 'Linked PO', 'Input Raw Stock', 'Input Wt (Tons)', 'Output Repacked Stock', 'Output Wt (Tons)', 'Loss (Tons)', 'Yield (%)', 'Remarks'];
         const rows = yieldData.map(r => [
             r.movementId,
-            r.date,
+            formatDisplayDate(r.date),
             r.poNumber,
             r.inputs.map((i: any) => `${i.variety} (${i.grade}) [${i.packing}] x${i.qty} (${i.weightTons}T)`).join('; '),
             r.inputTotalWeightTons,
@@ -2251,7 +2867,7 @@ function StoreReportsView({
             `${r.yieldPct}%`,
             r.remarks || ''
         ]);
-        exportToCSV(`repacking_yield_report_${new Date().toISOString().split('T')[0]}.csv`, headers, rows);
+        exportToCSV(`repacking_yield_report_${formatDisplayDate(new Date())}.csv`, headers, rows);
     };
 
     const exportToCSV = (filename: string, headers: string[], rows: any[][], metadata?: any[][]) => {
@@ -2517,7 +3133,7 @@ function StoreReportsView({
                                             return (
                                                 <TableRow key={row.id || idx} className={idx % 2 === 1 ? 'bg-muted/10' : ''}>
                                                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                                                        {new Date(row.datetime).toLocaleString()}
+                                                        {formatDisplayDateTime(row.datetime)}
                                                     </TableCell>
                                                     <TableCell className="font-mono text-xs max-w-[120px] truncate" title={row.movementId}>
                                                         {row.movementId}
@@ -2624,7 +3240,7 @@ function StoreReportsView({
 
                                         return (
                                             <TableRow key={row.movementId || idx} className={idx % 2 === 1 ? 'bg-muted/10' : ''}>
-                                                <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{row.date}</TableCell>
+                                                <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDisplayDate(row.date)}</TableCell>
                                                 <TableCell className="font-mono text-xs">{row.movementId}</TableCell>
                                                 <TableCell className="text-xs font-semibold">{row.poNumber || 'N/A'}</TableCell>
                                                 <TableCell className="text-xs max-w-[200px] truncate">
@@ -2662,6 +3278,205 @@ function StoreReportsView({
                     </CardContent>
                 </Card>
             )}
+        </div>
+    );
+}
+
+function StockLocatorView({ masterData, user }: { masterData: any; user: any }) {
+    const [query, setQuery] = useState('');
+    const [store, setStore] = useState('');
+    const [type, setType] = useState('');
+    const [variety, setVariety] = useState('');
+    const [grade, setGrade] = useState('');
+    const [packingDate, setPackingDate] = useState('');
+    const [results, setResults] = useState<any[]>([]);
+    const [loading, setLoading] = useState(false);
+
+    const handleSearch = async () => {
+        setLoading(true);
+        try {
+            const params = new URLSearchParams();
+            if (query) params.append('query', query);
+            if (store) params.append('store', store);
+            if (type) params.append('type', type);
+            if (variety) params.append('variety', variety);
+            if (grade) params.append('grade', grade);
+            if (packingDate) params.append('packingDate', packingDate);
+
+            const res = await fetch(`/api/stock/locate?${params.toString()}`);
+            const data = await res.json();
+            if (data.success) {
+                setResults(data.data);
+            }
+        } catch (error) {
+            console.error('Failed to locate stock:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        handleSearch();
+    }, [store, type, variety, grade, packingDate]);
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            handleSearch();
+        }
+    };
+
+    return (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <Card className="border-border/50 bg-card/40">
+                <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                        <Search size={18} className="text-primary" />
+                        Carton Location Mapping
+                    </CardTitle>
+                    <CardDescription>
+                        Scan a barcode or enter an MC/Short Code to find its exact cold store row/chamber coordinates.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    {/* Search Input */}
+                    <div className="flex gap-2">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                placeholder="Scan or enter MC number, barcode, or short code..."
+                                value={query}
+                                onChange={(e) => setQuery(e.target.value)}
+                                onKeyDown={handleKeyDown}
+                                className="pl-9 bg-background/50 border-border/60"
+                                autoFocus
+                            />
+                        </div>
+                        <Button onClick={handleSearch} disabled={loading} className="bg-primary text-white">
+                            Search
+                        </Button>
+                    </div>
+
+                    {/* Filter Bar */}
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2 pt-2 border-t border-border/20">
+                        <div>
+                            <label className="text-[10px] font-bold text-muted-foreground uppercase text-xs">Cold Store</label>
+                            <Select 
+                                value={store} 
+                                onChange={(e) => setStore(e.target.value)} 
+                                className="w-full mt-1 h-9 bg-background/50 border-border/60 text-xs"
+                            >
+                                <option value="">All Stores</option>
+                                {masterData?.coldStores?.map((s: string) => (
+                                    <option key={s} value={s}>{s}</option>
+                                ))}
+                            </Select>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-muted-foreground uppercase text-xs">Type</label>
+                            <Select 
+                                value={type} 
+                                onChange={(e) => setType(e.target.value)} 
+                                className="w-full mt-1 h-9 bg-background/50 border-border/60 text-xs"
+                            >
+                                <option value="">All Types</option>
+                                {masterData?.types?.map((t: string) => (
+                                    <option key={t} value={t}>{t}</option>
+                                ))}
+                            </Select>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-muted-foreground uppercase text-xs">Variety</label>
+                            <Select 
+                                value={variety} 
+                                onChange={(e) => setVariety(e.target.value)} 
+                                className="w-full mt-1 h-9 bg-background/50 border-border/60 text-xs"
+                            >
+                                <option value="">All Varieties</option>
+                                {masterData?.varieties?.map((v: string) => (
+                                    <option key={v} value={v}>{v}</option>
+                                ))}
+                            </Select>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-muted-foreground uppercase text-xs">Grade</label>
+                            <Select 
+                                value={grade} 
+                                onChange={(e) => setGrade(e.target.value)} 
+                                className="w-full mt-1 h-9 bg-background/50 border-border/60 text-xs"
+                            >
+                                <option value="">All Grades</option>
+                                {masterData?.grades?.map((g: string) => (
+                                    <option key={g} value={g}>{g}</option>
+                                ))}
+                            </Select>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-muted-foreground uppercase text-xs">Packing Date</label>
+                            <Input
+                                type="date"
+                                value={packingDate}
+                                onChange={(e) => setPackingDate(e.target.value)}
+                                className="w-full mt-1 h-9 bg-background/50 border-border/60 text-xs"
+                            />
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* Results */}
+            <Card className="border-border/50 bg-card/40">
+                <CardContent className="p-0">
+                    {loading ? (
+                        <div className="p-8 text-center text-muted-foreground">Searching database...</div>
+                    ) : results.length === 0 ? (
+                        <div className="p-8 text-center text-muted-foreground">
+                            No active cartons found matching the criteria. Only available stock is trackable.
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow className="border-border/30 hover:bg-transparent">
+                                        <th className="py-3 px-4 font-bold text-xs uppercase tracking-wider text-muted-foreground text-left">MC Number</th>
+                                        <th className="py-3 px-4 font-bold text-xs uppercase tracking-wider text-muted-foreground text-left">Short Code</th>
+                                        <th className="py-3 px-4 font-bold text-xs uppercase tracking-wider text-muted-foreground text-left">Location (Store | Section)</th>
+                                        <th className="py-3 px-4 font-bold text-xs uppercase tracking-wider text-muted-foreground text-left">SKU Specs</th>
+                                        <th className="py-3 px-4 font-bold text-xs uppercase tracking-wider text-muted-foreground text-left">Packing Date</th>
+                                        <th className="py-3 px-4 font-bold text-xs uppercase tracking-wider text-muted-foreground text-left">Status</th>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {results.map((c) => (
+                                        <TableRow key={c.mc_number} className="border-border/20 hover:bg-muted/10">
+                                            <TableCell className="font-mono font-semibold text-slate-700 dark:text-slate-300 py-3.5">{c.mc_number}</TableCell>
+                                            <TableCell className="font-mono font-bold text-sm text-primary py-3.5">{c.short_code || '---'}</TableCell>
+                                            <TableCell className="py-3.5">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-semibold text-foreground text-sm">{c.cold_store}</span>
+                                                    <span className="text-muted-foreground font-light text-sm">|</span>
+                                                    <Badge className="bg-indigo-600/10 text-indigo-700 hover:bg-indigo-600/10 font-bold border-indigo-200">
+                                                        {c.section_name || 'Unassigned Section'}
+                                                    </Badge>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="py-3.5">
+                                                <div className="text-sm font-semibold">{c.variety}</div>
+                                                <div className="text-xs text-muted-foreground">{c.grade} • {c.packing_code} ({c.type})</div>
+                                            </TableCell>
+                                            <TableCell className="py-3.5 font-mono text-xs text-muted-foreground">{formatDisplayDate(c.packing_date)}</TableCell>
+                                            <TableCell className="py-3.5">
+                                                <Badge variant={c.status === 'Available' ? 'outline' : 'secondary'} className={c.status === 'Available' ? 'border-emerald-300 text-emerald-700 bg-emerald-500/5' : ''}>
+                                                    {c.status}
+                                                </Badge>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
         </div>
     );
 }

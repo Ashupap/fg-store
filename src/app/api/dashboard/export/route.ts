@@ -6,6 +6,14 @@ import type { DashboardRow } from '@/types';
 
 export async function GET(request: NextRequest) {
     try {
+        const { getCurrentUser } = await import('@/lib/auth');
+        const user = await getCurrentUser();
+        if (!user) {
+            return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+        }
+        if (user.role !== 'operator') {
+            return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+        }
         const db = getDb();
         const { searchParams } = new URL(request.url);
 
@@ -195,10 +203,10 @@ export async function GET(request: NextRequest) {
         const buffer = exportDashboardToExcel(dashboardData);
         const filename = generateExcelFilename();
 
-        return new NextResponse(buffer as any, {
+        return new NextResponse(new Uint8Array(buffer), {
             status: 200,
             headers: {
-                'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'Content-Type': 'application/vnd.ms-excel',
                 'Content-Disposition': `attachment; filename="${filename}"`,
             },
         });

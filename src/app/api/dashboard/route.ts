@@ -18,6 +18,9 @@ export async function GET(request: NextRequest) {
         if (!user) {
             return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
         }
+        if (user.role !== 'operator') {
+            return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+        }
 
         // Build query with optional filters
         const conditions: string[] = [];

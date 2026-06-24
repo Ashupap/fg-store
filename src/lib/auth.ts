@@ -38,6 +38,13 @@ export function verifyToken(token: string): AuthToken | null {
     }
 }
 
+export function hasPermission(user: UserPublic, permission: string): boolean {
+    if (!user) return false;
+    if (user.role === 'admin') return true;
+    if (!user.permissions) return false;
+    return user.permissions.includes('*') || user.permissions.includes(permission);
+}
+
 export async function getCurrentUser(): Promise<UserPublic | null> {
     try {
         const cookieStore = await cookies();
@@ -54,6 +61,10 @@ export async function getCurrentUser(): Promise<UserPublic | null> {
 
         if (!user) return null;
 
+        // Fetch permissions from database dynamically
+        const roleData = db.prepare('SELECT permissions FROM roles WHERE name = ?').get(user.role) as { permissions: string } | undefined;
+        user.permissions = roleData ? JSON.parse(roleData.permissions) : [];
+
         // Fetch assigned stores
         const assignedStores = db.prepare('SELECT store_id, name FROM user_stores JOIN stores ON user_stores.store_id = stores.id WHERE user_id = ?').all(user.id) as { store_id: number; name: string }[];
         user.assigned_store_ids = assignedStores.map(s => s.store_id);
@@ -68,9 +79,7 @@ export async function getCurrentUser(): Promise<UserPublic | null> {
 export async function loginUser(username: string, password: string): Promise<{ success: boolean; user?: UserPublic; token?: string; error?: string }> {
     const db = getDb();
 
-    // Check if input is email or username (optional hybrid, but request was explicitly username)
-    // We will stick to username primarily, but maybe fallback to email if we want to be nice?
-    // User said "Instead of user email, we'll use username". So I'll strictly query username.
+    // Check if input is email or username
     const user = db.prepare('SELECT * FROM users WHERE username = ? AND is_active = 1').get(username) as User | undefined;
 
     if (!user) {
@@ -88,9 +97,14 @@ export async function loginUser(username: string, password: string): Promise<{ s
         username: (user as any).username,
         name: user.name,
         role: user.role,
+        permissions: [],
         assigned_store_ids: [],
         assigned_store_names: [],
     };
+
+    // Fetch permissions from database dynamically
+    const roleData = db.prepare('SELECT permissions FROM roles WHERE name = ?').get(user.role) as { permissions: string } | undefined;
+    userPublic.permissions = roleData ? JSON.parse(roleData.permissions) : [];
 
     // Fetch assigned stores
     const assignedStores = db.prepare('SELECT store_id, name FROM user_stores JOIN stores ON user_stores.store_id = stores.id WHERE user_id = ?').all(user.id) as { store_id: number; name: string }[];

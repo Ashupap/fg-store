@@ -130,6 +130,21 @@ function initializeTables(db: Database.Database) {
     if (!hasIsRepacked) {
       db.exec("ALTER TABLE fg_stock_master ADD COLUMN is_repacked INTEGER DEFAULT 0");
     }
+
+    // Short code migration
+    const hasShortCode = tableInfo.some(col => col.name === 'short_code');
+    if (!hasShortCode) {
+      db.exec("ALTER TABLE fg_stock_master ADD COLUMN short_code TEXT");
+      db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_fg_stock_short_code ON fg_stock_master(short_code) WHERE short_code IS NOT NULL");
+    }
+
+    // Carton sequence table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS carton_sequence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
   } catch (err) {
     console.error('Migration for fg_stock_master columns failed:', err);
   }
@@ -142,8 +157,40 @@ function initializeTables(db: Database.Database) {
       po_number TEXT UNIQUE NOT NULL,
       customer TEXT,
       order_date TEXT,
+      branding_type TEXT DEFAULT 'Demo',
+      loading_store TEXT,
       status TEXT DEFAULT 'Active',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Migration: Add branding_type and loading_store to purchase_orders
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(purchase_orders)").all() as any[];
+    
+    const hasBrandingType = tableInfo.some(col => col.name === 'branding_type');
+    if (!hasBrandingType) {
+      db.exec("ALTER TABLE purchase_orders ADD COLUMN branding_type TEXT DEFAULT 'Demo'");
+    }
+
+    const hasLoadingStore = tableInfo.some(col => col.name === 'loading_store');
+    if (!hasLoadingStore) {
+      db.exec("ALTER TABLE purchase_orders ADD COLUMN loading_store TEXT");
+    }
+  } catch (err) {
+    console.error('Migration for purchase_orders columns failed:', err);
+  }
+
+  // PO Customer Barcodes table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS po_customer_barcodes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      po_id INTEGER NOT NULL,
+      barcode TEXT UNIQUE NOT NULL,
+      status TEXT DEFAULT 'Unused',
+      mc_number TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (po_id) REFERENCES purchase_orders(id) ON DELETE CASCADE
     )
   `);
 
@@ -185,10 +232,22 @@ function initializeTables(db: Database.Database) {
       po_id INTEGER,
       status TEXT DEFAULT 'Completed',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      allocation_strategy TEXT DEFAULT 'FIFO',
       FOREIGN KEY (moved_by_id) REFERENCES users(id),
       FOREIGN KEY (approved_by_id) REFERENCES users(id)
     )
   `);
+
+  // Migration: Add allocation_strategy column if it doesn't exist
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(stock_movement_log)").all() as any[];
+    const hasAllocationStrategy = tableInfo.some(col => col.name === 'allocation_strategy');
+    if (!hasAllocationStrategy) {
+      db.exec("ALTER TABLE stock_movement_log ADD COLUMN allocation_strategy TEXT DEFAULT 'FIFO'");
+    }
+  } catch (err) {
+    console.error('Migration for allocation_strategy failed:', err);
+  }
 
   // Create indexes for better performance
   db.exec(`
@@ -237,6 +296,110 @@ function initializeTables(db: Database.Database) {
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // Roles table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS roles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      permissions TEXT NOT NULL, -- JSON string array of permission keys
+      is_system INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Seed default roles if empty
+  const rolesCount = db.prepare("SELECT count(*) as count FROM roles").get() as { count: number };
+  if (rolesCount.count === 0) {
+    console.log('Seeding default roles...');
+    const seedRole = db.prepare("INSERT INTO roles (name, permissions, is_system) VALUES (?, ?, ?)");
+    seedRole.run('admin', JSON.stringify(['*']), 1);
+    seedRole.run('general_manager', JSON.stringify([
+      'master:manage',
+      'transfer:approve',
+      'po:manage',
+      'po:allocate',
+      'shipment:manage',
+      'shipment:scan',
+      'reports:view',
+      'transaction:update'
+    ]), 1);
+    seedRole.run('marketing_manager', JSON.stringify([
+      'po:manage',
+      'po:allocate',
+      'reports:view'
+    ]), 1);
+    seedRole.run('manager', JSON.stringify([
+      'transfer:approve',
+      'transfer:accept',
+      'reports:view'
+    ]), 1);
+    seedRole.run('operator', JSON.stringify([
+      'inward:create',
+      'transfer:initiate'
+    ]), 1);
+  }
+
+  // Audit Logs table for tracking transaction corrections
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action_type TEXT NOT NULL,
+      table_name TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      before_state TEXT NOT NULL,
+      after_state TEXT NOT NULL,
+      changed_by_id INTEGER NOT NULL,
+      changed_by_name TEXT NOT NULL,
+      change_reason TEXT NOT NULL,
+      timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (changed_by_id) REFERENCES users(id)
+    )
+  `);
+
+  // Store Sections table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS store_sections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      store_name TEXT NOT NULL,
+      name TEXT NOT NULL,
+      capacity_mcs INTEGER NOT NULL DEFAULT 500,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (store_name) REFERENCES stores(name) ON DELETE CASCADE,
+      UNIQUE(store_name, name)
+    )
+  `);
+
+  // Migration: Add section_id to fg_stock_master
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(fg_stock_master)").all() as any[];
+    const hasSectionId = tableInfo.some(col => col.name === 'section_id');
+    if (!hasSectionId) {
+      db.exec("ALTER TABLE fg_stock_master ADD COLUMN section_id INTEGER REFERENCES store_sections(id)");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_fg_stock_section ON fg_stock_master(section_id)");
+    }
+  } catch (err) {
+    console.error('Migration for section_id failed:', err);
+  }
+
+  // Pre-seed default sections (A, B, C, D) for active stores
+  try {
+    const activeStores = db.prepare("SELECT name FROM stores WHERE is_active = 1").all() as { name: string }[];
+    const insertSection = db.prepare(`
+      INSERT OR IGNORE INTO store_sections (store_name, name, capacity_mcs)
+      VALUES (?, ?, 500)
+    `);
+    for (const store of activeStores) {
+      insertSection.run(store.name, 'Section A');
+      insertSection.run(store.name, 'Section B');
+      insertSection.run(store.name, 'Section C');
+      insertSection.run(store.name, 'Section D');
+    }
+  } catch (err) {
+    console.error('Pre-seeding default sections failed:', err);
+  }
 }
 
 // Helper to close database connection (for cleanup)

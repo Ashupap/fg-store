@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Printer, ArrowLeft, CheckCircle2, LayoutGrid, FileText } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { formatDisplayDateTime } from '@/lib/utils';
 
 interface CartonData {
     mc_number: string;
@@ -168,7 +169,7 @@ export default function PrintCodesPage({ params }: { params: Promise<{ id: strin
                             <div>
                                 <h1 className="text-xl font-bold text-slate-800 tracking-tight">Carton Marking Guide</h1>
                                 <p className="text-xs text-slate-500 mt-1">Transaction ID: <span className="font-mono font-semibold">{data.movement_id}</span></p>
-                                <p className="text-xs text-slate-500">Date: {new Date(data.movement_datetime).toLocaleString()}</p>
+                                <p className="text-xs text-slate-500">Date: {formatDisplayDateTime(data.movement_datetime)}</p>
                             </div>
                             <div className="text-right">
                                 <span className="inline-block bg-indigo-50 text-indigo-700 font-semibold px-2.5 py-1 rounded text-xs">

@@ -1,9 +1,10 @@
-
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 
-// GET /api/po/active - Get all active POs that are fully allocated but not yet shipped
+// GET /api/po/active - Get all POs that are ready for dispatch
+// Demo POs: status = Fulfilled (stock Reserved)
+// Branded POs: status = Fulfilled (stock Allocated after repack)
 export async function GET(request: NextRequest) {
     try {
         const user = await getCurrentUser();
@@ -13,13 +14,14 @@ export async function GET(request: NextRequest) {
 
         const db = getDb();
 
-        // Find POs that are 'Fulfilled' (fully allocated) but don't have a shipment yet
+        // Return all Fulfilled POs with branding_type and loading_store for the dispatch wizard
         const pos = db.prepare(`
             SELECT p.id, p.po_number, p.customer, p.status, p.created_at,
-                   (SELECT COUNT(*) FROM fg_stock_master WHERE reserved_for_po = p.po_number) as allocated_count
+                   COALESCE(p.branding_type, 'Demo') as branding_type,
+                   p.loading_store,
+                   (SELECT COUNT(*) FROM fg_stock_master WHERE reserved_for_po = p.po_number AND status IN ('Reserved', 'Allocated')) as allocated_count
             FROM purchase_orders p
-            LEFT JOIN shipments s ON p.id = s.po_id
-            WHERE p.status = 'Fulfilled' AND s.id IS NULL
+            WHERE p.status IN ('Fulfilled', 'Active')
             ORDER BY p.created_at DESC
         `).all();
 

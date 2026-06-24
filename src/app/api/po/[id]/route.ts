@@ -65,6 +65,9 @@ export async function GET(
         const poWithLineItems: POWithLineItems = {
             id: po.id,
             po_number: po.po_number,
+            customer: po.customer,
+            branding_type: (po as any).branding_type || 'Demo',
+            loading_store: (po as any).loading_store || null,
             order_date: po.order_date,
             status: po.status,
             created_at: po.created_at,

@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { poNumber, orderDate, lineItems } = validation.data;
+        const { poNumber, orderDate, brandingType, loadingStore, lineItems } = validation.data;
         const db = getDb();
 
         // Check if PO number already exists
@@ -125,8 +125,8 @@ export async function POST(request: NextRequest) {
 
         // Insert PO and line items in transaction
         const insertPO = db.prepare(`
-            INSERT INTO purchase_orders (po_number, order_date, status)
-            VALUES (?, ?, 'Active')
+            INSERT INTO purchase_orders (po_number, order_date, branding_type, loading_store, status)
+            VALUES (?, ?, ?, ?, 'Active')
         `);
 
         const insertLineItem = db.prepare(`
@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
         let poId: number | bigint = 0;
 
         const transaction = db.transaction(() => {
-            const result = insertPO.run(poNumber, orderDate);
+            const result = insertPO.run(poNumber, orderDate, brandingType || 'Demo', loadingStore || null);
             poId = result.lastInsertRowid;
 
             for (const item of lineItems) {
@@ -147,16 +147,6 @@ export async function POST(request: NextRequest) {
         });
 
         transaction();
-
-        // Auto-allocate immediately
-        try {
-            if (poId) {
-                autoAllocatePO(Number(poId));
-            }
-        } catch (allocError) {
-            console.error('Auto-allocation failed:', allocError);
-            // Don't fail the PO creation just because auto-alloc failed
-        }
 
         return NextResponse.json({
             success: true,

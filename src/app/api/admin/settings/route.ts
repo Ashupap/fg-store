@@ -1,7 +1,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, hasPermission } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
     try {
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
     try {
         const user = await getCurrentUser();
-        if (!user || user.role !== 'admin') {
+        if (!user || !hasPermission(user, 'settings:manage')) {
             return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
         }
 
