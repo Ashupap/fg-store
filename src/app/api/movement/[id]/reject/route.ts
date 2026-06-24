@@ -20,7 +20,7 @@ export async function POST(
         const movementId = id;
         const db = getDb();
 
-        const log = db.prepare('SELECT status, from_location, to_location FROM stock_movement_log WHERE movement_id = ?').get(movementId) as any;
+        const log = db.prepare('SELECT status, from_location, to_location FROM stock_movement_log WHERE movement_id = ?').get(movementId) as { status: string; from_location: string | null; to_location: string | null } | undefined;
 
         if (!log) {
             return NextResponse.json(

@@ -4,7 +4,16 @@ import { cookies } from 'next/headers';
 import { getDb } from './db';
 import type { User, UserPublic, AuthToken } from '@/types';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fg-store-secret-key-change-in-production';
+const JWT_SECRET = (() => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('JWT_SECRET environment variable is required in production');
+    }
+    return 'dev-secret-do-not-use-in-production';
+  }
+  return secret;
+})();
 const TOKEN_EXPIRY = '7d'; // 7 days
 
 export async function hashPassword(password: string): Promise<string> {
@@ -23,7 +32,7 @@ export function generateToken(user: UserPublic): string {
     const payload: Omit<AuthToken, 'exp'> & { username?: string } = {
         userId: user.id,
         email: user.email,
-        username: (user as any).username, // Cast to any to bypass type check for now if types not updated
+        username: user.username ?? undefined,
         name: user.name,
         role: user.role,
     };
@@ -94,7 +103,7 @@ export async function loginUser(username: string, password: string): Promise<{ s
     const userPublic: UserPublic & { username: string } = {
         id: user.id,
         email: user.email, // Keep email in object
-        username: (user as any).username,
+        username: user.username ?? '',
         name: user.name,
         role: user.role,
         permissions: [],

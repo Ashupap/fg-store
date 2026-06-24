@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
         const validation = createShipmentSchema.safeParse(body);
 
         if (!validation.success) {
-            const error = validation.error as any;
+            const error = validation.error as unknown as { errors: Array<{ message: string }> };
             return NextResponse.json({ success: false, error: error.errors[0].message }, { status: 400 });
         }
 
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
         const db = getDb();
 
         // 1. Check if PO exists and is not already shipped
-        const po = db.prepare('SELECT id, po_number, status FROM purchase_orders WHERE id = ?').get(poId) as any;
+        const po = db.prepare('SELECT id, po_number, status FROM purchase_orders WHERE id = ?').get(poId) as { id: number; po_number: string; status: string } | undefined;
         if (!po) {
             return NextResponse.json({ success: false, error: 'PO not found' }, { status: 404 });
         }

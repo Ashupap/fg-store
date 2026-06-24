@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import {
     Package,
     Plus,
@@ -39,6 +40,10 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { ActionHub } from '@/components/stock-movement/action-hub';
+import { PendingApprovals } from '@/components/stock-movement/pending-approvals';
+import { HistoryTable } from '@/components/stock-movement/history-table';
+import { StockMovementSkeleton } from '@/components/ui/page-skeletons';
 
 interface MasterData {
     grades: string[];
@@ -208,30 +213,59 @@ export default function StockMovementPage() {
     }, [user]);
 
     const refreshAllData = () => {
-        fetchStockSummary();
-        fetchPendingRequests();
-        fetchHistory();
+        refetchStock();
+        refetchPending();
+        refetchHistory();
         fetchMasterData();
         fetchSettings();
         fetchActivePOs();
         fetchInRepackingStock();
     };
 
-    const fetchStockSummary = async () => {
-        try {
-            const response = await fetch('/api/stock');
-            const result = await response.json();
-            if (result.success) setStockSummary(result.data);
-        } catch (error) { console.error(error); }
-    };
+    // React Query for stock summary
+    const { data: stockResult, refetch: refetchStock } = useQuery({
+        queryKey: ['stock-summary'],
+        queryFn: async () => {
+            const res = await fetch('/api/stock');
+            if (!res.ok) throw new Error('Failed to fetch stock');
+            return res.json();
+        },
+        enabled: !!user,
+    });
 
-    const fetchPendingRequests = async () => {
-        try {
-            const response = await fetch('/api/movement/pending');
-            const result = await response.json();
-            if (result.success) setPendingRequests(result.data);
-        } catch (error) { console.error(error); }
-    };
+    // React Query for pending requests
+    const { data: pendingResult, refetch: refetchPending } = useQuery({
+        queryKey: ['pending-requests'],
+        queryFn: async () => {
+            const res = await fetch('/api/movement/pending');
+            if (!res.ok) throw new Error('Failed to fetch pending');
+            return res.json();
+        },
+        enabled: !!user,
+    });
+
+    // React Query for history
+    const { data: historyResult, refetch: refetchHistory } = useQuery({
+        queryKey: ['movement-history'],
+        queryFn: async () => {
+            const res = await fetch('/api/movement/history');
+            if (!res.ok) throw new Error('Failed to fetch history');
+            return res.json();
+        },
+        enabled: !!user,
+    });
+
+    useEffect(() => {
+        if (stockResult?.success) setStockSummary(stockResult.data);
+    }, [stockResult]);
+
+    useEffect(() => {
+        if (pendingResult?.success) setPendingRequests(pendingResult.data);
+    }, [pendingResult]);
+
+    useEffect(() => {
+        if (historyResult?.success) setHistory(historyResult.data);
+    }, [historyResult]);
 
     const fetchHistory = async () => {
         try {
@@ -870,7 +904,7 @@ export default function StockMovementPage() {
             return () => clearTimeout(timer);
         }
     }, [toast]);
-    if (loading) return <div className="min-h-screen flex items-center justify-center bg-background"><div className="animate-spin h-8 w-8 border-4 border-primary rounded-full border-t-transparent"></div></div>;
+    if (loading) return <StockMovementSkeleton />;
     if (!user) return null;
 
     return (
@@ -892,260 +926,16 @@ export default function StockMovementPage() {
             </div>
 
             <div className="max-w-7xl mx-auto space-y-6">
-                    {/* Action Hub Cards */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-                        <div 
-                            onClick={() => openModal('INWARD')} 
-                            className="group relative overflow-hidden rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-5 hover:bg-emerald-500/10 hover:border-emerald-500/40 transition-all duration-300 cursor-pointer shadow-sm hover:shadow-md flex flex-col justify-between min-h-[140px]"
-                        >
-                            <div className="flex items-center justify-between mb-3">
-                                <div className="p-2.5 rounded-lg bg-emerald-600 text-white shadow-lg shadow-emerald-600/20">
-                                    <ArrowDownToLine size={20} />
-                                </div>
-                                <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full">Inbound</span>
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-base text-foreground mb-1 group-hover:text-emerald-600 transition-colors">Inward</h3>
-                                <p className="text-xs text-muted-foreground leading-relaxed">Receive stock from production, generate carton codes.</p>
-                            </div>
-                        </div>
+                    <ActionHub onOpenModal={openModal} />
 
-                        <div 
-                            onClick={() => openModal('TRANSFER')} 
-                            className="group relative overflow-hidden rounded-xl border border-blue-500/20 bg-blue-500/5 p-5 hover:bg-blue-500/10 hover:border-blue-500/40 transition-all duration-300 cursor-pointer shadow-sm hover:shadow-md flex flex-col justify-between min-h-[140px]"
-                        >
-                            <div className="flex items-center justify-between mb-3">
-                                <div className="p-2.5 rounded-lg bg-blue-600 text-white shadow-lg shadow-blue-600/20">
-                                    <ArrowRightLeft size={20} />
-                                </div>
-                                <span className="text-[10px] font-semibold text-blue-600 bg-blue-500/10 px-2 py-0.5 rounded-full">Internal</span>
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-base text-foreground mb-1 group-hover:text-blue-600 transition-colors">Transfer</h3>
-                                <p className="text-xs text-muted-foreground leading-relaxed">Move cartons between cold store warehouses.</p>
-                            </div>
-                        </div>
-
-                        <div 
-                            onClick={() => openModal('DISPATCH')} 
-                            className="group relative overflow-hidden rounded-xl border border-amber-500/20 bg-amber-500/5 p-5 hover:bg-amber-500/10 hover:border-amber-500/40 transition-all duration-300 cursor-pointer shadow-sm hover:shadow-md flex flex-col justify-between min-h-[140px]"
-                        >
-                            <div className="flex items-center justify-between mb-3">
-                                <div className="p-2.5 rounded-lg bg-amber-600 text-white shadow-lg shadow-amber-600/20">
-                                    <Truck size={20} />
-                                </div>
-                                <span className="text-[10px] font-semibold text-amber-600 bg-amber-500/10 px-2 py-0.5 rounded-full">Outbound</span>
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-base text-foreground mb-1 group-hover:text-amber-600 transition-colors">Dispatch</h3>
-                                <p className="text-xs text-muted-foreground leading-relaxed">Allocate and ship master cartons against active POs.</p>
-                            </div>
-                        </div>
-
-                        <div 
-                            onClick={() => openModal('REPACK_OUT')} 
-                            className="group relative overflow-hidden rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-5 hover:bg-indigo-500/10 hover:border-indigo-500/40 transition-all duration-300 cursor-pointer shadow-sm hover:shadow-md flex flex-col justify-between min-h-[140px]"
-                        >
-                            <div className="flex items-center justify-between mb-3">
-                                <div className="p-2.5 rounded-lg bg-indigo-600 text-white shadow-lg shadow-indigo-600/20">
-                                    <Scissors size={20} />
-                                </div>
-                                <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-50/50 px-2 py-0.5 rounded-full">Process</span>
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-base text-foreground mb-1 group-hover:text-indigo-600 transition-colors">Repack Out</h3>
-                                <p className="text-xs text-muted-foreground leading-relaxed">Initiate repacking, consume source cartons.</p>
-                            </div>
-                        </div>
-
-                        <div 
-                            onClick={() => openModal('REPACK_IN')} 
-                            className="group relative overflow-hidden rounded-xl border border-purple-500/20 bg-purple-500/5 p-5 hover:bg-purple-500/10 hover:border-purple-500/40 transition-all duration-300 cursor-pointer shadow-sm hover:shadow-md flex flex-col justify-between min-h-[140px]"
-                        >
-                            <div className="flex items-center justify-between mb-3">
-                                <div className="p-2.5 rounded-lg bg-purple-600 text-white shadow-lg shadow-purple-600/20">
-                                    <Layers size={20} />
-                                </div>
-                                <span className="text-[10px] font-semibold text-purple-600 bg-purple-50/50 px-2 py-0.5 rounded-full">Process</span>
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-base text-foreground mb-1 group-hover:text-purple-600 transition-colors">Repack In</h3>
-                                <p className="text-xs text-muted-foreground leading-relaxed">Complete repacking, generate new carton codes.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Pending Approvals Section */}
-                    {pendingRequests.length > 0 && (
-                        <Card className="border-l-4 border-l-amber-500 bg-amber-500/5 border-border/50">
-                            <CardHeader className="pb-2">
-                                <CardTitle className="text-lg font-semibold flex items-center gap-2 text-amber-600">
-                                    <Clock size={20} />
-                                    Pending Approvals
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                {/* Desktop Table View */}
-                                <div className="hidden md:block rounded-md border border-border/50 bg-background/50 overflow-hidden">
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>
-                                                <TableHead>Time</TableHead>
-                                                <TableHead>Type</TableHead>
-                                                <TableHead>Details</TableHead>
-                                                <TableHead>Qty</TableHead>
-                                                <TableHead>Requested By</TableHead>
-                                                {(user.role === 'admin' || user.role === 'manager') && (
-                                                    <TableHead className="text-right">Actions</TableHead>
-                                                )}
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {pendingRequests.map((req) => (
-                                                <TableRow key={req.id}>
-                                                    <TableCell className="text-muted-foreground text-sm">
-                                                        {formatDisplayDateTime(req.movement_datetime)}
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <Badge variant={req.status === 'In Transit' ? 'secondary' : (req.action_type === 'INWARD' ? 'success' : req.action_type === 'TRANSFER' ? 'info' : req.action_type === 'REPACK_OUT' ? 'warning' : 'info')}>
-                                                            {req.status === 'In Transit' ? 'In Transit' : req.action_type.replace('_', ' ')}
-                                                        </Badge>
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <div className="font-medium">{req.variety} <span className="text-muted-foreground font-normal">({req.grade})</span></div>
-                                                        <div className="text-xs text-muted-foreground">{req.packing}</div>
-                                                        <div className="text-xs mt-1 font-mono">
-                                                            {req.from_location ? `${req.from_location} → ` : ''}
-                                                            {req.to_location}
-                                                        </div>
-                                                    </TableCell>
-                                                    <TableCell className="font-semibold">{req.qty_mcs} MCs</TableCell>
-                                                    <TableCell className="text-sm">{req.moved_by_name}</TableCell>
-                                                    {(user.role === 'admin' || user.role === 'manager') && (
-                                                        <TableCell className="text-right">
-                                                            <div className="flex justify-end gap-2">
-                                                                {req.status === 'In Transit' ? (
-                                                                    <Button
-                                                                        onClick={() => handleAccept(req.movement_id)}
-                                                                        size="sm"
-                                                                        className="h-8 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full flex items-center gap-1"
-                                                                        title="Accept Transfer"
-                                                                    >
-                                                                        <CheckCircle size={14} /> Accept
-                                                                    </Button>
-                                                                ) : (
-                                                                    <>
-                                                                        <Button
-                                                                            onClick={() => handleEdit(req)}
-                                                                            size="sm"
-                                                                            variant="ghost"
-                                                                            className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-                                                                            title="Edit Request"
-                                                                        >
-                                                                            <Pencil size={14} />
-                                                                        </Button>
-                                                                        <Button
-                                                                            onClick={() => handleApprove(req.movement_id)}
-                                                                            size="sm"
-                                                                            className="h-8 w-8 p-0 bg-emerald-500 hover:bg-emerald-600 rounded-full"
-                                                                            title="Approve"
-                                                                        >
-                                                                            <Check size={14} />
-                                                                        </Button>
-                                                                        <Button
-                                                                            onClick={() => handleReject(req.movement_id)}
-                                                                            size="sm"
-                                                                            variant="destructive"
-                                                                            className="h-8 w-8 p-0 rounded-full"
-                                                                            title="Reject"
-                                                                        >
-                                                                            <Ban size={14} />
-                                                                        </Button>
-                                                                    </>
-                                                                )}
-                                                            </div>
-                                                        </TableCell>
-                                                    )}
-                                                </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
-                                </div>
-
-                                {/* Mobile Cards View */}
-                                <div className="md:hidden space-y-3">
-                                    {pendingRequests.map((req) => (
-                                        <div key={req.id} className="p-4 rounded-xl border border-border bg-card/60 space-y-3">
-                                            <div className="flex items-center justify-between">
-                                                <Badge variant={req.status === 'In Transit' ? 'secondary' : (req.action_type === 'INWARD' ? 'success' : req.action_type === 'TRANSFER' ? 'info' : req.action_type === 'REPACK_OUT' ? 'warning' : 'info')}>
-                                                    {req.status === 'In Transit' ? 'In Transit' : req.action_type.replace('_', ' ')}
-                                                </Badge>
-                                                <span className="text-muted-foreground text-xs">
-                                                    {formatDisplayDate(req.movement_datetime)}
-                                                </span>
-                                            </div>
-                                            <div>
-                                                <div className="font-semibold text-sm">{req.variety} <span className="text-muted-foreground text-xs">({req.grade})</span></div>
-                                                <div className="text-xs text-muted-foreground">{req.packing}</div>
-                                                <div className="text-xs mt-1 font-mono bg-muted/40 px-2 py-1 rounded w-fit">
-                                                    {req.from_location ? `${req.from_location} → ` : ''}{req.to_location}
-                                                </div>
-                                            </div>
-                                            <div className="flex justify-between items-center text-xs pt-1.5 border-t border-border/40">
-                                                <div>
-                                                    <span className="text-muted-foreground">Qty: </span>
-                                                    <span className="font-bold">{req.qty_mcs} MCs</span>
-                                                </div>
-                                                <div>
-                                                    <span className="text-muted-foreground">By: </span>
-                                                    <span className="font-medium">{req.moved_by_name}</span>
-                                                </div>
-                                            </div>
-                                            {(user.role === 'admin' || user.role === 'manager') && (
-                                                <div className="flex gap-2 pt-2 border-t border-border/40">
-                                                    {req.status === 'In Transit' ? (
-                                                        <Button
-                                                            onClick={() => handleAccept(req.movement_id)}
-                                                            size="sm"
-                                                            className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center justify-center gap-1.5 h-9"
-                                                        >
-                                                            <CheckCircle size={14} /> Accept Transfer
-                                                        </Button>
-                                                    ) : (
-                                                        <div className="flex w-full gap-2 justify-end">
-                                                            <Button
-                                                                onClick={() => handleEdit(req)}
-                                                                size="sm"
-                                                                variant="outline"
-                                                                className="flex-1 h-9 flex items-center justify-center gap-1.5"
-                                                            >
-                                                                <Pencil size={14} /> Edit
-                                                            </Button>
-                                                            <Button
-                                                                onClick={() => handleApprove(req.movement_id)}
-                                                                size="sm"
-                                                                className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white h-9 flex items-center justify-center gap-1.5"
-                                                            >
-                                                                <Check size={14} /> Approve
-                                                            </Button>
-                                                            <Button
-                                                                onClick={() => handleReject(req.movement_id)}
-                                                                size="sm"
-                                                                variant="destructive"
-                                                                className="h-9 w-9 p-0 rounded-lg shrink-0 flex items-center justify-center"
-                                                            >
-                                                                <Ban size={14} />
-                                                            </Button>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            </CardContent>
-                        </Card>
-                    )}
+                    <PendingApprovals
+                        requests={pendingRequests}
+                        user={user}
+                        onApprove={handleApprove}
+                        onReject={handleReject}
+                        onAccept={handleAccept}
+                        onEdit={handleEdit}
+                    />
 
                     {/* View Switcher */}
                     <div className="flex justify-center">
@@ -1221,326 +1011,19 @@ export default function StockMovementPage() {
                                 </CardContent>
                             </Card>
 
-                            {/* Recent History */}
-                            <Card className="lg:col-span-2 border-border/50 bg-card/40 flex flex-col h-[500px]">
-                                <CardHeader className="pb-4">
-                                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                                        <div>
-                                            <CardTitle className="text-lg">Movement History</CardTitle>
-                                            <CardDescription>Recent transaction log.</CardDescription>
-                                        </div>
-                                    </div>
-                                    {/* Filter Toolbar */}
-                                    <div className="flex flex-wrap gap-2 items-center bg-muted/30 p-2 rounded-lg border border-border/40 mt-4">
-                                        <Filter size={14} className="text-muted-foreground ml-1" />
-
-                                        {/* Date Range */}
-                                        <div className="flex items-center gap-1">
-                                            <Input
-                                                type="date"
-                                                value={filters.fromDate}
-                                                onChange={e => setFilters(prev => ({ ...prev, fromDate: e.target.value }))}
-                                                className="h-8 text-xs py-1 w-32 bg-background/50"
-                                            />
-                                            <span className="text-muted-foreground">-</span>
-                                            <Input
-                                                type="date"
-                                                value={filters.toDate}
-                                                onChange={e => setFilters(prev => ({ ...prev, toDate: e.target.value }))}
-                                                className="h-8 text-xs py-1 w-32 bg-background/50"
-                                            />
-                                        </div>
-
-                                        {/* Filters */}
-                                        <Select
-                                            value={filters.actionType}
-                                            onChange={e => setFilters(prev => ({ ...prev, actionType: e.target.value }))}
-                                            className="h-8 text-xs py-0 w-28 bg-background/50"
-                                        >
-                                            <option value="ALL">All Types</option>
-                                            <option value="INWARD">Inward</option>
-                                            <option value="TRANSFER">Transfer</option>
-                                            <option value="DISPATCH">Dispatch</option>
-                                            <option value="REPACK_OUT">Repack Out</option>
-                                            <option value="REPACK_IN">Repack In</option>
-                                        </Select>
-
-                                        <Select
-                                            value={filters.variety}
-                                            onChange={e => setFilters(prev => ({ ...prev, variety: e.target.value }))}
-                                            className="h-8 text-xs py-0 w-32 bg-background/50"
-                                        >
-                                            <option value="ALL">All Varieties</option>
-                                            {masterData?.varieties.map(v => (
-                                                <option key={v} value={v}>{v}</option>
-                                            ))}
-                                        </Select>
-
-                                        <Select
-                                            value={filters.status}
-                                            onChange={e => setFilters(prev => ({ ...prev, status: e.target.value }))}
-                                            className="h-8 text-xs py-0 w-32 bg-background/50"
-                                        >
-                                            <option value="ALL">All Status</option>
-                                            <option value="Completed">Completed</option>
-                                            <option value="Pending Approval">Pending</option>
-                                            <option value="Rejected">Rejected</option>
-                                        </Select>
-
-                                        <Button
-                                            onClick={() => setFilters({ fromDate: '', toDate: '', actionType: 'ALL', variety: 'ALL', status: 'ALL' })}
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-8 px-2 text-xs"
-                                        >
-                                            Clear
-                                        </Button>
-                                    </div>
-                                </CardHeader>
-                                <CardContent className="flex-1 overflow-hidden p-0">
-                                    {/* Desktop Table View */}
-                                    <div className="hidden md:block h-full overflow-y-auto">
-                                        <Table>
-                                            <TableHeader className="sticky top-0 bg-card/95 backdrop-blur z-10">
-                                                <TableRow>
-                                                    <TableHead>Date</TableHead>
-                                                    <TableHead>Action</TableHead>
-                                                    <TableHead>Details</TableHead>
-                                                    <TableHead>Status</TableHead>
-                                                    <TableHead className="text-right">User</TableHead>
-                                                    <TableHead className="w-[50px]"></TableHead>
-                                                </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                                {history.map((item) => (
-                                                    <TableRow key={item.id}>
-                                                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                                                            {formatDisplayDate(item.movement_datetime)}
-                                                        </TableCell>
-                                                        <TableCell>
-                                                            <Badge variant={item.action_type === 'INWARD' ? 'success' : item.action_type === 'TRANSFER' ? 'info' : 'warning'}>
-                                                                {item.action_type}
-                                                            </Badge>
-                                                        </TableCell>
-                                                        <TableCell>
-                                                            <div className="flex flex-col gap-1">
-                                                                {/* Quantity & SKU */}
-                                                                <div className="flex items-center gap-2">
-                                                                    <span className="font-bold text-sm">{item.qty_mcs} MCs</span>
-                                                                    <span className="text-muted-foreground text-xs">•</span>
-                                                                    <span className="font-medium text-sm">{item.variety} <span className="text-muted-foreground text-xs font-normal">({item.grade})</span></span>
-                                                                </div>
-
-                                                                {/* Flow Details */}
-                                                                <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 px-2 py-1 rounded w-fit border border-border/30">
-                                                                    {item.action_type === 'INWARD' && (
-                                                                        <>
-                                                                            <ArrowDownToLine size={12} className="text-emerald-500" />
-                                                                            <span>Received at</span>
-                                                                            <span className="font-semibold text-foreground">{item.to_location}</span>
-                                                                        </>
-                                                                    )}
-                                                                    {item.action_type === 'TRANSFER' && (
-                                                                        <>
-                                                                            <span className="font-semibold text-foreground">{item.from_location}</span>
-                                                                            <ArrowRight size={12} className="text-sky-500" />
-                                                                            <span className="font-semibold text-foreground">{item.to_location}</span>
-                                                                        </>
-                                                                    )}
-                                                                    {item.action_type === 'DISPATCH' && (
-                                                                        <>
-                                                                            <span className="font-semibold text-foreground">{item.from_location}</span>
-                                                                            <ArrowUpRight size={12} className="text-amber-500" />
-                                                                            <span className="font-semibold text-foreground">{item.to_location}</span>
-                                                                        </>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        </TableCell>
-                                                        <TableCell>
-                                                            <Badge variant={item.status === 'Completed' ? 'outline' : item.status === 'Pending Approval' ? 'secondary' : item.status === 'Partial' ? 'destructive' : 'default'} className={
-                                                                item.status === 'Completed' ? 'border-emerald-500/30 text-emerald-600 bg-emerald-500/5' :
-                                                                    item.status === 'Partial' ? 'bg-red-100 text-red-700 hover:bg-red-200 border-red-200' : ''
-                                                            }>
-                                                                {item.status}
-                                                            </Badge>
-                                                        </TableCell>
-                                                        <TableCell className="text-right text-xs text-muted-foreground">
-                                                            {item.moved_by_name}
-                                                        </TableCell>
-                                                        <TableCell>
-                                                            <div className="flex items-center gap-1 justify-end">
-                                                                {user && (user.role === 'admin' || user.role === 'general_manager' || user.role === 'manager') && item.action_type === 'TRANSFER' && ['Pending Approval', 'In Transit'].includes(item.status) && (
-                                                                    <Button
-                                                                        onClick={() => handleCancelTransfer(item.movement_id, item.status)}
-                                                                        variant="ghost"
-                                                                        size="sm"
-                                                                        className="h-8 w-8 p-0"
-                                                                        title="Cancel Transfer"
-                                                                    >
-                                                                        <Ban size={14} className="text-rose-500" />
-                                                                    </Button>
-                                                                )}
-                                                                {user && (user.role === 'admin' || user.permissions?.includes('*') || user.permissions?.includes('transaction:update')) && ['INWARD', 'TRANSFER', 'DISPATCH'].includes(item.action_type) && item.status !== 'Rejected' && (
-                                                                    <Button
-                                                                        onClick={() => handleEdit(item)}
-                                                                        variant="ghost"
-                                                                        size="sm"
-                                                                        className="h-8 w-8 p-0"
-                                                                        title="Edit/Correct Transaction"
-                                                                    >
-                                                                        <Pencil size={14} className="text-blue-500" />
-                                                                    </Button>
-                                                                )}
-                                                                {['INWARD', 'REPACK_IN'].includes(item.action_type) && item.status === 'Completed' && (
-                                                                    <Button
-                                                                        onClick={() => handlePrintCodes(item.movement_id)}
-                                                                        variant="ghost"
-                                                                        size="sm"
-                                                                        className="h-8 w-8 p-0"
-                                                                        title="Print Carton Codes"
-                                                                    >
-                                                                        <ScanBarcode size={14} className="text-indigo-600" />
-                                                                    </Button>
-                                                                )}
-                                                                {settings['enable_location_mapping'] === 'true' && ['INWARD', 'REPACK_IN', 'TRANSFER'].includes(item.action_type) && item.status === 'Completed' && (
-                                                                    <Button
-                                                                        onClick={() => handlePrintMasterReport(item.movement_id)}
-                                                                        variant="ghost"
-                                                                        size="sm"
-                                                                        className="h-8 w-8 p-0"
-                                                                        title="Print Master Report"
-                                                                    >
-                                                                        <FileText size={14} className="text-emerald-600" />
-                                                                    </Button>
-                                                                )}
-                                                                <Button
-                                                                    onClick={() => handlePrintReceipt(item.movement_id)}
-                                                                    variant="ghost"
-                                                                    size="sm"
-                                                                    className="h-8 w-8 p-0"
-                                                                    title="Print Receipt"
-                                                                >
-                                                                    <Printer size={14} className="text-muted-foreground" />
-                                                                </Button>
-                                                            </div>
-                                                        </TableCell>
-                                                    </TableRow>
-                                                ))}
-                                            </TableBody>
-                                        </Table>
-                                    </div>
-
-                                    {/* Mobile Cards View */}
-                                    <div className="md:hidden space-y-3 p-4 overflow-y-auto h-full">
-                                        {history.length === 0 ? (
-                                            <p className="text-xs text-center py-8 text-muted-foreground">No recent transactions</p>
-                                        ) : (
-                                            history.map((item) => (
-                                                <div key={item.id} className="p-4 rounded-xl border border-border bg-card/60 space-y-3">
-                                                    <div className="flex items-center justify-between">
-                                                        <Badge variant={item.action_type === 'INWARD' ? 'success' : item.action_type === 'TRANSFER' ? 'info' : 'warning'}>
-                                                            {item.action_type}
-                                                        </Badge>
-                                                        <span className="text-muted-foreground text-xs">
-                                                            {formatDisplayDate(item.movement_datetime)}
-                                                        </span>
-                                                    </div>
-                                                    <div>
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="font-bold text-sm">{item.qty_mcs} MCs</span>
-                                                            <span className="text-muted-foreground text-xs">•</span>
-                                                            <span className="font-semibold text-sm">{item.variety} <span className="text-muted-foreground text-xs font-normal">({item.grade})</span></span>
-                                                        </div>
-                                                        <div className="text-[10px] text-muted-foreground mt-0.5">{item.packing}</div>
-                                                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/40 px-2 py-1 rounded w-fit border border-border/30 mt-2">
-                                                            {item.action_type === 'INWARD' && (
-                                                                <>
-                                                                    <ArrowDownToLine size={12} className="text-emerald-500" />
-                                                                    <span>Received at {item.to_location}</span>
-                                                                </>
-                                                            )}
-                                                            {item.action_type === 'TRANSFER' && (
-                                                                <>
-                                                                    <span>{item.from_location}</span>
-                                                                    <ArrowRight size={12} className="text-sky-500" />
-                                                                    <span>{item.to_location}</span>
-                                                                </>
-                                                            )}
-                                                            {item.action_type === 'DISPATCH' && (
-                                                                <>
-                                                                    <span>{item.from_location}</span>
-                                                                    <ArrowUpRight size={12} className="text-amber-500" />
-                                                                    <span>{item.to_location}</span>
-                                                                </>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex justify-between items-center text-xs pt-2 border-t border-border/40">
-                                                        <Badge variant={item.status === 'Completed' ? 'outline' : item.status === 'Pending Approval' ? 'secondary' : item.status === 'Partial' ? 'destructive' : 'default'} className={
-                                                            item.status === 'Completed' ? 'border-emerald-500/30 text-emerald-600 bg-emerald-500/5' :
-                                                                item.status === 'Partial' ? 'bg-red-100 text-red-700 hover:bg-red-200 border-red-200' : ''
-                                                        }>
-                                                            {item.status}
-                                                        </Badge>
-                                                        <span className="text-muted-foreground text-[10px]">Moved by: {item.moved_by_name}</span>
-                                                    </div>
-                                                    <div className="flex justify-end gap-2 pt-2 border-t border-border/40">
-                                                        {user && (user.role === 'admin' || user.role === 'general_manager' || user.role === 'manager') && item.action_type === 'TRANSFER' && ['Pending Approval', 'In Transit'].includes(item.status) && (
-                                                            <Button
-                                                                onClick={() => handleCancelTransfer(item.movement_id, item.status)}
-                                                                variant="outline"
-                                                                size="sm"
-                                                                className="h-8 flex-1 flex items-center justify-center gap-1 text-rose-600 border-rose-200 hover:bg-rose-50/50"
-                                                            >
-                                                                <Ban size={12} /> Cancel
-                                                            </Button>
-                                                        )}
-                                                        {user && (user.role === 'admin' || user.permissions?.includes('*') || user.permissions?.includes('transaction:update')) && ['INWARD', 'TRANSFER', 'DISPATCH'].includes(item.action_type) && item.status !== 'Rejected' && (
-                                                            <Button
-                                                                onClick={() => handleEdit(item)}
-                                                                variant="outline"
-                                                                size="sm"
-                                                                className="h-8 flex-1 flex items-center justify-center gap-1 text-blue-600 border-blue-200 hover:bg-blue-50/50"
-                                                            >
-                                                                <Pencil size={12} /> Edit
-                                                            </Button>
-                                                        )}
-                                                        {['INWARD', 'REPACK_IN'].includes(item.action_type) && item.status === 'Completed' && (
-                                                            <Button
-                                                                onClick={() => handlePrintCodes(item.movement_id)}
-                                                                variant="outline"
-                                                                size="sm"
-                                                                className="h-8 flex-1 flex items-center justify-center gap-1 text-indigo-600 border-indigo-200 hover:bg-indigo-50/50"
-                                                            >
-                                                                <ScanBarcode size={12} /> Print
-                                                            </Button>
-                                                        )}
-                                                        {settings['enable_location_mapping'] === 'true' && ['INWARD', 'REPACK_IN', 'TRANSFER'].includes(item.action_type) && item.status === 'Completed' && (
-                                                            <Button
-                                                                onClick={() => handlePrintMasterReport(item.movement_id)}
-                                                                variant="outline"
-                                                                size="sm"
-                                                                className="h-8 flex-1 flex items-center justify-center gap-1 text-emerald-600 border-emerald-200 hover:bg-emerald-50/50"
-                                                            >
-                                                                <FileText size={12} /> Master Report
-                                                            </Button>
-                                                        )}
-                                                        <Button
-                                                            onClick={() => handlePrintReceipt(item.movement_id)}
-                                                            variant="outline"
-                                                            size="sm"
-                                                            className="h-8 flex-1 flex items-center justify-center gap-1 text-muted-foreground"
-                                                        >
-                                                            <Printer size={12} /> Receipt
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                            ))
-                                        )}
-                                    </div>
-                                </CardContent>
-                            </Card>
+                            <HistoryTable
+                                history={history}
+                                user={user}
+                                filters={filters}
+                                setFilters={setFilters}
+                                masterData={masterData}
+                                settings={settings}
+                                onCancel={handleCancelTransfer}
+                                onEdit={handleEdit}
+                                onPrintReceipt={handlePrintReceipt}
+                                onPrintCodes={handlePrintCodes}
+                                onPrintMasterReport={handlePrintMasterReport}
+                            />
                         </div>
                     )}
                     {view === 'locator' && (

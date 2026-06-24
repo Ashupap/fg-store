@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
+import { Providers } from "@/app/providers";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,8 +36,10 @@ export default function RootLayout({
           enableSystem={false}
           disableTransitionOnChange
         >
-          <div className="fixed inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))] opacity-20 pointer-events-none" />
-          {children}
+          <Providers>
+            <div className="fixed inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))] opacity-20 pointer-events-none" />
+            {children}
+          </Providers>
         </ThemeProvider>
       </body>
     </html>

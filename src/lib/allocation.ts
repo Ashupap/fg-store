@@ -13,7 +13,7 @@ export function autoAllocatePO(poId: number): number {
         SELECT id, type, variety, grade, packing_code, ordered_qty, allocated_qty, po_id
         FROM po_line_items 
         WHERE po_id = ? AND allocated_qty < ordered_qty
-    `).all(poId) as any[];
+    `).all(poId) as { id: number; type: string; variety: string; grade: string; packing_code: string; ordered_qty: number; allocated_qty: number; po_id: number }[];
 
     if (lineItems.length === 0) return 0;
 

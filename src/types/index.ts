@@ -192,20 +192,6 @@ export interface MovementResult {
     shortCodes?: string[];
 }
 
-// Auth types
-export interface LoginCredentials {
-    email: string;
-    password: string;
-}
-
-export interface AuthToken {
-    userId: number;
-    email: string;
-    name: string;
-    role: string;
-    exp: number;
-}
-
 // PO Allocation types
 export interface POLineItemInput {
     type: string;

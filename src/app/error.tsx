@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect } from 'react';
+import { AlertTriangle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 export default function Error({
     error,
@@ -10,34 +12,29 @@ export default function Error({
     reset: () => void;
 }) {
     useEffect(() => {
-        // Log the error to an error reporting service
         console.error(error);
     }, [error]);
 
     return (
-        <div className="flex flex-col items-center justify-center min-h-screen bg-neutral-950 text-white p-4">
-            <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-8 max-w-md text-center shadow-2xl">
-                <h2 className="text-2xl font-bold mb-4 text-red-500">System Error</h2>
-                <p className="mb-6 text-neutral-400">
-                    An unexpected error occurred within the application.
-                    Please try refreshing or contacting support.
+        <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground p-4">
+            <div className="bg-card border border-border rounded-xl p-8 max-w-md text-center shadow-lg">
+                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
+                    <AlertTriangle className="h-6 w-6 text-destructive" />
+                </div>
+                <h2 className="text-2xl font-bold mb-2 text-foreground">Something went wrong</h2>
+                <p className="mb-6 text-muted-foreground text-sm">
+                    An unexpected error occurred. Please try refreshing or contact support.
                 </p>
-                <div className="flex gap-4 justify-center">
-                    <button
-                        onClick={() => window.location.reload()} // Hard Reset first
-                        className="px-6 py-2 bg-neutral-800 rounded hover:bg-neutral-700 transition-colors"
-                    >
+                <div className="flex gap-3 justify-center">
+                    <Button variant="outline" onClick={() => window.location.reload()}>
                         Reload Page
-                    </button>
-                    <button
-                        onClick={() => reset()}
-                        className="px-6 py-2 bg-[#2E8B57] rounded hover:bg-[#3CB371] transition-colors font-medium shadow-[0_0_15px_rgba(46,139,87,0.3)]"
-                    >
+                    </Button>
+                    <Button onClick={() => reset()}>
                         Try Again
-                    </button>
+                    </Button>
                 </div>
                 {process.env.NODE_ENV === 'development' && (
-                    <div className="mt-8 text-left bg-black p-4 rounded text-xs font-mono text-red-400 overflow-auto max-h-40">
+                    <div className="mt-6 text-left bg-muted rounded-lg p-4 text-xs font-mono text-destructive overflow-auto max-h-40 border border-border">
                         {error.message}
                     </div>
                 )}

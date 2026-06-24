@@ -37,6 +37,8 @@ export async function GET(
             po_number: string;
             customer: string | null;
             order_date: string | null;
+            branding_type: string;
+            loading_store: string | null;
             status: string;
             created_at: string;
         } | undefined;
@@ -66,8 +68,8 @@ export async function GET(
             id: po.id,
             po_number: po.po_number,
             customer: po.customer,
-            branding_type: (po as any).branding_type || 'Demo',
-            loading_store: (po as any).loading_store || null,
+            branding_type: po.branding_type || 'Demo',
+            loading_store: po.loading_store || null,
             order_date: po.order_date,
             status: po.status,
             created_at: po.created_at,

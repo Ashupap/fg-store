@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import path from 'path';
+import type { ColumnInfo } from '@/lib/db-types';
 
 // Database file path
 const dbPath = path.join(process.cwd(), 'data', 'fg-store.db');
@@ -44,7 +45,7 @@ function initializeTables(db: Database.Database) {
 
   // Migration: Add username column if it doesn't exist
   try {
-    const tableInfo = db.prepare("PRAGMA table_info(users)").all() as any[];
+    const tableInfo = db.prepare("PRAGMA table_info(users)").all() as ColumnInfo[];
     const hasUsername = tableInfo.some(col => col.name === 'username');
     if (!hasUsername) {
       // SQLite does not support adding UNIQUE columns directly via ALTER TABLE
@@ -111,7 +112,7 @@ function initializeTables(db: Database.Database) {
 
   // Migration: Add barcode and repacking columns to fg_stock_master
   try {
-    const tableInfo = db.prepare("PRAGMA table_info(fg_stock_master)").all() as any[];
+    const tableInfo = db.prepare("PRAGMA table_info(fg_stock_master)").all() as ColumnInfo[];
     
     // Barcode migration
     const hasBarcode = tableInfo.some(col => col.name === 'barcode');
@@ -166,7 +167,7 @@ function initializeTables(db: Database.Database) {
 
   // Migration: Add branding_type and loading_store to purchase_orders
   try {
-    const tableInfo = db.prepare("PRAGMA table_info(purchase_orders)").all() as any[];
+    const tableInfo = db.prepare("PRAGMA table_info(purchase_orders)").all() as ColumnInfo[];
     
     const hasBrandingType = tableInfo.some(col => col.name === 'branding_type');
     if (!hasBrandingType) {
@@ -240,7 +241,7 @@ function initializeTables(db: Database.Database) {
 
   // Migration: Add allocation_strategy column if it doesn't exist
   try {
-    const tableInfo = db.prepare("PRAGMA table_info(stock_movement_log)").all() as any[];
+    const tableInfo = db.prepare("PRAGMA table_info(stock_movement_log)").all() as ColumnInfo[];
     const hasAllocationStrategy = tableInfo.some(col => col.name === 'allocation_strategy');
     if (!hasAllocationStrategy) {
       db.exec("ALTER TABLE stock_movement_log ADD COLUMN allocation_strategy TEXT DEFAULT 'FIFO'");
@@ -374,7 +375,7 @@ function initializeTables(db: Database.Database) {
 
   // Migration: Add section_id to fg_stock_master
   try {
-    const tableInfo = db.prepare("PRAGMA table_info(fg_stock_master)").all() as any[];
+    const tableInfo = db.prepare("PRAGMA table_info(fg_stock_master)").all() as ColumnInfo[];
     const hasSectionId = tableInfo.some(col => col.name === 'section_id');
     if (!hasSectionId) {
       db.exec("ALTER TABLE fg_stock_master ADD COLUMN section_id INTEGER REFERENCES store_sections(id)");

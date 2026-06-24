@@ -30,7 +30,7 @@ export async function GET(
             FROM po_customer_barcodes
             WHERE po_id = ?
             ORDER BY id ASC
-        `).all(poId) as any[];
+        `).all(poId) as { id: number; barcode: string; status: string; mc_number: string | null; created_at: string }[];
 
         const summary = {
             total: barcodes.length,

@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
             WHERE f.cold_store = ? AND f.packing_date = ? AND f.status = 'Available'
         `;
 
-        const data = db.prepare(query).all(store, date) as any[];
+        const data = db.prepare(query).all(store, date) as { mc_number: string; type: string | null; variety: string | null; packing_code: string; packing: string | null; grade: string; packing_date: string }[];
 
         // Filter by the available carton set in memory
         const filteredRows = data.filter(row => availableMcSet.has(row.mc_number));
@@ -67,8 +67,8 @@ export async function GET(request: NextRequest) {
             const key = `${row.type}||${row.variety}||${row.packing_code}||${row.grade}||${row.packing_date}`;
             if (!groups[key]) {
                 groups[key] = {
-                    type: row.type,
-                    variety: row.variety,
+                    type: row.type ?? '',
+                    variety: row.variety ?? '',
                     packing: packingName,
                     grade: row.grade,
                     packingDate: row.packing_date,

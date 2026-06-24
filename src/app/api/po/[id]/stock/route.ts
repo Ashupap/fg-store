@@ -49,7 +49,7 @@ export async function GET(
             LEFT JOIN store_sections sec ON s.section_id = sec.id
             WHERE s.reserved_for_po = ? AND s.status = ?
         `;
-        const params2: any[] = [po.po_number, requiredStatus];
+        const params2: (string | number)[] = [po.po_number, requiredStatus];
 
         if (storeFilter) {
             query += ' AND s.cold_store = ?';
@@ -58,10 +58,10 @@ export async function GET(
 
         query += ' ORDER BY s.packing_date ASC, s.cold_store ASC';
 
-        const cartons = db.prepare(query).all(...params2) as any[];
+        const cartons = db.prepare(query).all(...params2) as { id: number; mc_number: string; short_code: string | null; barcode: string | null; grade: string; variety: string | null; type: string | null; packing_code: string; packing_date: string; cold_store: string; status: string; section_name: string | null }[];
 
         // Group by store for a cleaner response
-        const storeGroups: Record<string, any[]> = {};
+        const storeGroups: Record<string, typeof cartons> = {};
         for (const carton of cartons) {
             if (!storeGroups[carton.cold_store]) {
                 storeGroups[carton.cold_store] = [];

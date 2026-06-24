@@ -35,7 +35,7 @@ const NAV_ITEMS: NavItem[] = [
         label: 'Dashboard',
         icon: LayoutDashboard,
         section: 'Overview',
-        roles: ['operator'],
+        roles: ['admin', 'general_manager', 'manager', 'marketing_manager'],
     },
     {
         href: '/stock-movement',

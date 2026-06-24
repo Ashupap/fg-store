@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import type { MovementLogRow, StockMasterRow } from '@/lib/db-types';
 
 export async function POST(
     request: NextRequest,
@@ -20,7 +21,7 @@ export async function POST(
         const db = getDb();
 
         // Fetch current movement log
-        const log = db.prepare('SELECT * FROM stock_movement_log WHERE movement_id = ?').get(movementId) as any;
+        const log = db.prepare('SELECT * FROM stock_movement_log WHERE movement_id = ?').get(movementId) as MovementLogRow | undefined;
         if (!log) {
             return NextResponse.json(
                 { success: false, error: 'Movement log not found' },
@@ -88,12 +89,12 @@ export async function POST(
         let errorMsg = '';
         const transaction = db.transaction(() => {
             const oldMcNumbers = log.mc_numbers ? log.mc_numbers.split(',') : [];
-            let beforeStock: any[] = [];
+            let beforeStock: StockMasterRow[] = [];
             if (oldMcNumbers.length > 0) {
                 const placeholders = oldMcNumbers.map(() => '?').join(',');
                 beforeStock = db.prepare(
                     `SELECT * FROM fg_stock_master WHERE mc_number IN (${placeholders})`
-                ).all(...oldMcNumbers) as any[];
+                ).all(...oldMcNumbers) as StockMasterRow[];
             }
 
             // Verify that all moved cartons are still Available and at their destination or In Transit
@@ -122,13 +123,13 @@ export async function POST(
 
             // Audit Trail
             const beforeStateStr = JSON.stringify({ log, stock: beforeStock });
-            const afterLog = db.prepare('SELECT * FROM stock_movement_log WHERE movement_id = ?').get(movementId) as any;
-            let afterStock: any[] = [];
+            const afterLog = db.prepare('SELECT * FROM stock_movement_log WHERE movement_id = ?').get(movementId) as MovementLogRow | undefined;
+            let afterStock: StockMasterRow[] = [];
             if (oldMcNumbers.length > 0) {
                 const placeholders = oldMcNumbers.map(() => '?').join(',');
                 afterStock = db.prepare(
                     `SELECT * FROM fg_stock_master WHERE mc_number IN (${placeholders})`
-                ).all(...oldMcNumbers) as any[];
+                ).all(...oldMcNumbers) as StockMasterRow[];
             }
             const afterStateStr = JSON.stringify({ log: afterLog, stock: afterStock });
 

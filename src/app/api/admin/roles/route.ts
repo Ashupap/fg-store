@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 import { z } from 'zod';
+import type { RoleRow } from '@/lib/db-types';
 
 const roleSchema = z.object({
     name: z.string().min(1, 'Role name is required'),
@@ -41,7 +42,7 @@ export async function GET(request: NextRequest) {
         }
 
         const db = getDb();
-        const roles = db.prepare('SELECT * FROM roles ORDER BY is_system DESC, name ASC').all() as any[];
+        const roles = db.prepare('SELECT * FROM roles ORDER BY is_system DESC, name ASC').all() as (RoleRow & { permissions: string })[];
 
         // Parse permissions JSON
         const parsedRoles = roles.map(r => ({

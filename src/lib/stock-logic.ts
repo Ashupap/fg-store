@@ -3,6 +3,7 @@ import { generateMovementId, generateMCNumber, getNextMCSequence, formatDate, pa
 import { inwardMovementSchema, transferMovementSchema, dispatchMovementSchema, repackStartSchema, repackCompleteSchema } from '@/lib/validations';
 import type { MovementResult } from '@/types';
 import { processGlobalPendingAllocations } from '@/lib/allocation';
+import type { CartonRow, StockMasterRow, PendingMovementRow } from '@/lib/db-types';
 
 // Handle INWARD movement - Production to Store
 export async function handleInward(data: unknown, userId: number, existingMovementId?: string): Promise<MovementResult> {
@@ -296,7 +297,7 @@ export async function handleDispatch(data: unknown, userId: number, existingMove
             SELECT id, mc_number, grade, variety, type, packing_code, packing_date, status, cold_store, short_code, barcode
             FROM fg_stock_master
             WHERE cold_store = ? AND reserved_for_po = ? AND status = ?
-        `).all(fromStore, po.po_number, requiredStatus) as any[];
+        `).all(fromStore, po.po_number, requiredStatus) as CartonRow[];
 
         if (stocks.length === 0) {
             const hint = brandingType === 'Branded'
@@ -313,7 +314,7 @@ export async function handleDispatch(data: unknown, userId: number, existingMove
             // Match against mc_number, short_code, OR customer barcode (multi-identifier)
             const matchedStocks = stocks.filter(c =>
                 specificMCNumbers.includes(c.mc_number) ||
-                specificMCNumbers.includes(c.short_code) ||
+                (c.short_code && specificMCNumbers.includes(c.short_code)) ||
                 (c.barcode && specificMCNumbers.includes(c.barcode))
             );
             if (matchedStocks.length !== specificMCNumbers.length) {
@@ -412,7 +413,7 @@ export async function handleRepackOut(data: unknown, userId: number, existingMov
             SELECT id, mc_number, status, cold_store, reserved_for_po 
             FROM fg_stock_master
             WHERE mc_number IN (${placeholders}) AND cold_store = ?
-        `).all(...mcNumbers, fromStore) as any[];
+        `).all(...mcNumbers, fromStore) as { id: number; mc_number: string; status: string; cold_store: string; reserved_for_po: string | null }[];
 
         if (stocks.length !== mcNumbers.length) {
             throw new Error('One or more MCs are not in the selected store or do not exist');
@@ -522,7 +523,7 @@ export async function handleRepackIn(data: unknown, userId: number): Promise<Mov
         const placeholders = originalMcNumbers.map(() => '?').join(',');
         const parents = db.prepare(`
             SELECT * FROM fg_stock_master WHERE mc_number IN (${placeholders})
-        `).all(...originalMcNumbers) as any[];
+        `).all(...originalMcNumbers) as StockMasterRow[];
 
         if (parents.length !== originalMcNumbers.length) {
             throw new Error('One or more original MCs not found');
@@ -814,12 +815,12 @@ export function getAvailableCartons(
         FROM stock_movement_log
         WHERE status = 'Pending Approval' AND from_location = ?
     `;
-    const pendingParams: any[] = [store];
+    const pendingParams: (string | undefined)[] = [store];
     if (excludeMovementId) {
         pendingQuery += ' AND movement_id != ?';
         pendingParams.push(excludeMovementId);
     }
-    const pendingRequests = db.prepare(pendingQuery).all(...pendingParams) as any[];
+    const pendingRequests = db.prepare(pendingQuery).all(...pendingParams) as PendingMovementRow[];
 
     const reservedMCs = new Set<string>();
 

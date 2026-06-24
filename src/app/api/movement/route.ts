@@ -217,7 +217,7 @@ async function createPendingRequest(data: any, userId: number, actionType: strin
         return { success: false, error: error.issues[0].message };
     }
 
-    const valData = validation.data as any;
+    const valData = validation.data as { type?: string | null; variety?: string | null; packing?: string | null; grade?: string | null; qty?: number; fromStore?: string | null; toStore?: string | null; remarks?: string | null; dispatchPurpose?: string | null; poId?: number | null; allocationStrategy?: string };
     const { type = null, variety = null, packing = null, grade = null, qty = 0 } = valData;
     const fromStore = valData.fromStore || null;
     // For Dispatch, 'toStore' is client name. For Inward, it's valid store.

@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
             )
             ORDER BY movement_datetime ASC, id ASC
         `;
-        const logs = db.prepare(query).all(store, store) as any[];
+        const logs = db.prepare(query).all(store, store) as { id: number; movement_id: string; movement_datetime: string; action_type: string; from_location: string | null; to_location: string | null; type: string | null; variety: string | null; packing: string | null; grade: string | null; mc_numbers: string | null; qty_mcs: number; status: string; remarks: string | null }[];
 
         // Filter and format the logs
         const fromDateStr = fromDate ? `${fromDate}T00:00:00.000Z` : '1970-01-01T00:00:00.000Z';
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
                     } else {
                         const mcDetail = db.prepare(
                             'SELECT variety, grade, packing_code, type FROM fg_stock_master WHERE mc_number = ?'
-                        ).get(firstMc) as any;
+                        ).get(firstMc) as { variety: string | null; grade: string; packing_code: string; type: string | null } | undefined;
 
                         if (mcDetail) {
                             skuVariety = mcDetail.variety;
@@ -82,10 +82,10 @@ export async function GET(request: NextRequest) {
                             skuPacking = mcDetail.packing_code;
                             skuType = mcDetail.type;
                             mcSkuCache.set(firstMc, {
-                                variety: skuVariety,
+                                variety: skuVariety ?? '',
                                 grade: skuGrade,
                                 packing: skuPacking,
-                                type: skuType
+                                type: skuType ?? ''
                             });
                         }
                     }

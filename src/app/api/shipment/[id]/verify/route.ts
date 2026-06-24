@@ -25,7 +25,7 @@ export async function POST(
 
         const validation = verifySchema.safeParse(body);
         if (!validation.success) {
-            const error = validation.error as any;
+            const error = validation.error as unknown as { errors: Array<{ message: string }> };
             return NextResponse.json({ success: false, error: error.errors[0].message }, { status: 400 });
         }
 

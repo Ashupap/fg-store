@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
             FROM store_sections ss
             LEFT JOIN stores s ON ss.store_name = s.name
         `;
-        const params: any[] = [];
+        const params: string[] = [];
 
         if (store) {
             query += ' WHERE ss.store_name = ?';
@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
         }
         query += ' ORDER BY ss.store_name, ss.name';
 
-        const sections = db.prepare(query).all(...params) as any[];
+        const sections = db.prepare(query).all(...params) as { id: number; store_name: string; name: string; capacity_mcs: number; store_type: string | null }[];
 
         // Hydrate occupied carton counts for each section
         const hydratedSections = sections.map(section => {

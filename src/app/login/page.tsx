@@ -31,14 +31,10 @@ export default function LoginPage() {
             const result = await response.json();
 
             if (result.success) {
-                // Use window.location.href to ensure a full refresh and robust navigation
-                // This prevents issues where 'Enter' key might conflict with Router state
-                if (result.user?.role === 'admin') {
-                    window.location.href = '/admin';
-                } else if (result.user?.role === 'marketing_manager') {
-                    window.location.href = '/dashboard';
-                } else {
+                if (result.user?.role === 'operator') {
                     window.location.href = '/stock-movement';
+                } else {
+                    window.location.href = '/dashboard';
                 }
                 // router.refresh(); // Not needed with window.location.href
             } else {

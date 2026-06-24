@@ -29,7 +29,7 @@ export default function AppShell({ user, settings, children }: AppShellProps) {
     const sidebarWidth = isCollapsed ? 'lg:pl-16' : 'lg:pl-60';
 
     return (
-        <div className="min-h-screen bg-slate-50">
+        <div className="min-h-screen bg-background">
             <Sidebar
                 user={user}
                 settings={settings}
@@ -40,7 +40,6 @@ export default function AppShell({ user, settings, children }: AppShellProps) {
                 onLogout={handleLogout}
             />
 
-            {/* Main content area shifts with sidebar */}
             <div className={`flex flex-col min-h-screen transition-all duration-300 ${sidebarWidth}`}>
                 <TopBar
                     user={user}
@@ -54,13 +53,12 @@ export default function AppShell({ user, settings, children }: AppShellProps) {
                     </div>
                 </main>
 
-                {/* Footer */}
-                <footer className="border-t border-border/40 py-3 px-6 flex items-center justify-between bg-white/50">
+                <footer className="border-t border-border/40 py-3 px-6 flex items-center justify-between bg-background/50">
                     <p className="text-xs text-muted-foreground">
                         Marine Flow FG Store ERP — v2.0
                     </p>
                     <p className="text-xs text-muted-foreground">
-                        Built with ❤️ in India
+                        Built with heart in India
                     </p>
                 </footer>
             </div>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import type { AuditLogRow } from '@/lib/db-types';
 
 export async function GET(request: NextRequest) {
     try {
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
                 al.timestamp
             FROM audit_logs al
             ORDER BY al.timestamp DESC, al.id DESC
-        `).all() as any[];
+        `).all() as AuditLogRow[];
 
         return NextResponse.json({ success: true, data: auditLogs });
     } catch (error: any) {

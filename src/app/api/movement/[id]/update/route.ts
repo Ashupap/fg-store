@@ -4,6 +4,7 @@ import { getCurrentUser, hasPermission } from '@/lib/auth';
 import { inwardMovementSchema, transferMovementSchema, dispatchMovementSchema } from '@/lib/validations';
 import { generateMCNumber, getNextMCSequence, formatDate, packingToCode } from '@/lib/utils';
 import { generateShortCodesBlock } from '@/lib/stock-logic';
+import type { MovementLogRow, StockMasterRow } from '@/lib/db-types';
 
 export async function PUT(
     request: NextRequest,
@@ -31,7 +32,7 @@ export async function PUT(
 
         const transaction = db.transaction(() => {
             // 1. Fetch current movement log
-            const log = db.prepare('SELECT * FROM stock_movement_log WHERE movement_id = ?').get(id) as any;
+            const log = db.prepare('SELECT * FROM stock_movement_log WHERE movement_id = ?').get(id) as MovementLogRow | undefined;
             if (!log) {
                 errorMsg = 'Movement log not found';
                 throw new Error(errorMsg);
@@ -44,12 +45,12 @@ export async function PUT(
 
             // 2. Fetch current stock records matching mc_numbers
             const oldMcNumbers = log.mc_numbers ? log.mc_numbers.split(',') : [];
-            let beforeStock: any[] = [];
+            let beforeStock: StockMasterRow[] = [];
             if (oldMcNumbers.length > 0) {
                 const placeholders = oldMcNumbers.map(() => '?').join(',');
                 beforeStock = db.prepare(
                     `SELECT * FROM fg_stock_master WHERE mc_number IN (${placeholders})`
-                ).all(...oldMcNumbers) as any[];
+                ).all(...oldMcNumbers) as StockMasterRow[];
             }
 
             // Snapshot the state before changes
@@ -272,13 +273,13 @@ export async function PUT(
             }
 
             // 5. Get the updated log and stock records for after_state
-            const afterLog = db.prepare('SELECT * FROM stock_movement_log WHERE movement_id = ?').get(id) as any;
-            let afterStock: any[] = [];
+            const afterLog = db.prepare('SELECT * FROM stock_movement_log WHERE movement_id = ?').get(id) as MovementLogRow | undefined;
+            let afterStock: StockMasterRow[] = [];
             if (newMcNumbers.length > 0) {
                 const placeholders = newMcNumbers.map(() => '?').join(',');
                 afterStock = db.prepare(
                     `SELECT * FROM fg_stock_master WHERE mc_number IN (${placeholders})`
-                ).all(...newMcNumbers) as any[];
+                ).all(...newMcNumbers) as StockMasterRow[];
             }
 
             const afterStateStr = JSON.stringify({ log: afterLog, stock: afterStock });

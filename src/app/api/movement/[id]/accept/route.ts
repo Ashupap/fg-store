@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 import { allocateSectionsForBatch } from '@/lib/stock-logic';
+import type { MovementLogRow } from '@/lib/db-types';
 
 export async function POST(
     request: NextRequest,
@@ -17,7 +18,7 @@ export async function POST(
         const db = getDb();
 
         // 1. Fetch the movement
-        const movement = db.prepare('SELECT * FROM stock_movement_log WHERE movement_id = ?').get(id) as any;
+        const movement = db.prepare('SELECT * FROM stock_movement_log WHERE movement_id = ?').get(id) as MovementLogRow | undefined;
 
         if (!movement) {
             return NextResponse.json({ success: false, error: 'Movement not found' }, { status: 404 });
@@ -34,8 +35,8 @@ export async function POST(
             const toStoreDetails = db.prepare('SELECT type FROM stores WHERE name = ?').get(movement.to_location) as { type: string } | undefined;
             const isToStoreRented = toStoreDetails?.type === 'Rented';
 
-            const isAuthorized = allowedStores.includes(movement.to_location) || 
-                               (isToStoreRented && allowedStores.includes(movement.from_location));
+            const isAuthorized = (movement.to_location && allowedStores.includes(movement.to_location)) || 
+                               (isToStoreRented && movement.from_location && allowedStores.includes(movement.from_location));
 
             if (!isAuthorized) {
                 return NextResponse.json({
@@ -61,7 +62,7 @@ export async function POST(
             const useMapping = settingVal?.value === 'true';
 
             // Allocate sections in destination store if enabled
-            const allocations = useMapping ? allocateSectionsForBatch(db, movement.to_location, mcNumbers.length) : [];
+            const allocations = useMapping && movement.to_location ? allocateSectionsForBatch(db, movement.to_location, mcNumbers.length) : [];
             let allocationIdx = 0;
             let allocatedCount = 0;
 

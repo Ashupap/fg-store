@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+'use client';
 
-import { Warehouse, AlertTriangle, CheckCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Warehouse, AlertTriangle } from 'lucide-react';
 
 interface CapacityData {
     id: number;
@@ -21,88 +21,64 @@ export default function CapacityWidget() {
             try {
                 const res = await fetch('/api/dashboard/capacity');
                 const result = await res.json();
-                if (result.success) {
-                    setData(result.data);
-                }
+                if (result.success) setData(result.data);
             } catch (err) {
                 console.error('Failed to fetch capacity:', err);
             } finally {
                 setLoading(false);
             }
         };
-
         fetchCapacity();
-
-        // Refresh every 5 mins
         const interval = setInterval(fetchCapacity, 5 * 60 * 1000);
         return () => clearInterval(interval);
     }, []);
 
-    if (loading) return null;
-    if (data.length === 0) return null; // Don't show if no stores available
-
-    const getUtilizationColor = (pct: number) => {
-        if (pct >= 90) return 'bg-red-500';
-        if (pct >= 75) return 'bg-amber-500';
-        return 'bg-emerald-500';
-    };
+    if (loading || data.length === 0) return null;
 
     return (
-        <Card className="border-border/50 bg-card/40 backdrop-blur-xl">
-            <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <CardTitle className="text-lg flex items-center gap-2 text-foreground font-bold">
-                            <Warehouse size={20} className="text-primary" />
-                            Store Capacity
-                        </CardTitle>
-                        <CardDescription className="text-muted-foreground">Utilization based on estimated weight</CardDescription>
-                    </div>
-                </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
+        <div className="bg-card/40 border border-border/50 rounded-xl p-4 backdrop-blur-sm">
+            <div className="flex items-center gap-2 mb-4">
+                <Warehouse size={16} className="text-primary" />
+                <span className="text-sm font-bold text-foreground">Store Capacity</span>
+                <span className="text-xs text-muted-foreground ml-auto">Utilization by weight</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {data.map(store => {
-                    const utilization = store.capacityTons > 0
-                        ? (store.usedTons / store.capacityTons) * 100
-                        : 0;
-
-                    const isCritical = utilization >= 90;
-
+                    const pct = store.capacityTons > 0 ? (store.usedTons / store.capacityTons) * 100 : 0;
+                    const isCritical = pct >= 90;
                     return (
-                        <div key={store.id} className="space-y-2">
-                            <div className="flex justify-between items-end text-sm">
-                                <div className="font-medium flex items-center gap-2">
-                                    <span>{store.name}</span>
+                        <div key={store.id} className="space-y-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                                <span className="font-medium text-foreground flex items-center gap-1.5">
+                                    {store.name}
                                     {store.type === 'Rented' && (
-                                        <span className="text-[10px] px-1.5 py-0.5 bg-violet-600/10 text-violet-700 font-bold border border-violet-500/20 rounded-full">
-                                            Rented
+                                        <span className="text-[9px] px-1 py-0.5 bg-violet-600/10 text-violet-700 font-bold rounded-full">
+                                            R
                                         </span>
                                     )}
-                                    {isCritical && <AlertTriangle size={14} className="text-red-500 animate-pulse" />}
-                                </div>
-                                <div className="text-muted-foreground">
-                                    <span className={utilization >= 90 ? "text-red-500 font-bold" : "text-foreground"}>
-                                        {utilization.toFixed(1)}%
-                                    </span>
-                                    <span className="mx-1">/</span>
-                                    {store.usedTons.toLocaleString()} of {store.capacityTons.toLocaleString()} Tons
-                                </div>
+                                    {isCritical && <AlertTriangle size={11} className="text-red-500 animate-pulse" />}
+                                </span>
+                                <span className={`font-bold ${isCritical ? 'text-red-500' : 'text-foreground'}`}>
+                                    {pct.toFixed(0)}%
+                                </span>
                             </div>
-
                             <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
                                 <div
-                                    className={`h-full transition-all duration-500 ${getUtilizationColor(utilization)}`}
-                                    style={{ width: `${Math.min(utilization, 100)}%` }}
+                                    className={`h-full rounded-full transition-all duration-500 ${
+                                        pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-amber-500' : 'bg-emerald-500'
+                                    }`}
+                                    style={{ width: `${Math.min(pct, 100)}%` }}
                                 />
                             </div>
-
-                            <p className="text-xs text-muted-foreground text-right pl-1">
-                                {store.totalMCs.toLocaleString()} MCs
-                            </p>
+                            <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>{store.usedTons.toLocaleString()}T</span>
+                                <span>{store.totalMCs.toLocaleString()} MCs</span>
+                                <span>{store.capacityTons.toLocaleString()}T</span>
+                            </div>
                         </div>
                     );
                 })}
-            </CardContent>
-        </Card>
+            </div>
+        </div>
     );
 }

@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
             FROM stock_movement_log
             WHERE action_type = 'REPACK_IN' AND status = 'Completed'
         `;
-        const params: any[] = [];
+        const params: (string | undefined)[] = [];
 
         if (fromDate) {
             query += ' AND movement_datetime >= ?';
@@ -70,7 +70,7 @@ export async function GET(request: NextRequest) {
         }
 
         query += ' ORDER BY movement_datetime DESC';
-        const repackInLogs = db.prepare(query).all(...params) as any[];
+        const repackInLogs = db.prepare(query).all(...params) as { id: number; movement_id: string; movement_datetime: string; from_location: string | null; to_location: string | null; type: string | null; variety: string | null; packing: string | null; grade: string | null; qty_mcs: number; mc_numbers: string | null; remarks: string | null; po_id: number | null }[];
 
         // 2. Map original parents and calculate yield details for each job
         const reportData = repackInLogs.map(log => {
@@ -83,14 +83,14 @@ export async function GET(request: NextRequest) {
                 FROM fg_stock_master child
                 JOIN fg_stock_master parent ON child.parent_mc_id = parent.id
                 WHERE child.mc_number IN (${placeholders})
-            `).all(...childMCsList) as any[];
+            `).all(...childMCsList) as { mc_number: string; variety: string | null; grade: string; packing_code: string; type: string | null }[];
 
             // Group parents by SKU to calculate input weight
             const parentGroups: Record<string, { count: number; packing: string; variety: string; type: string; grade: string }> = {};
             parentStock.forEach(p => {
                 const key = `${p.variety}|${p.packing_code}|${p.grade}`;
                 if (!parentGroups[key]) {
-                    parentGroups[key] = { count: 0, packing: p.packing_code, variety: p.variety, type: p.type, grade: p.grade };
+                    parentGroups[key] = { count: 0, packing: p.packing_code, variety: p.variety ?? '', type: p.type ?? '', grade: p.grade };
                 }
                 parentGroups[key].count++;
             });
@@ -124,7 +124,7 @@ export async function GET(request: NextRequest) {
             // Fetch PO number if linked
             let poNumber = 'N/A';
             if (log.po_id) {
-                const po = db.prepare('SELECT po_number FROM purchase_orders WHERE id = ?').get(log.po_id) as any;
+                const po = db.prepare('SELECT po_number FROM purchase_orders WHERE id = ?').get(log.po_id) as { po_number: string } | undefined;
                 if (po) poNumber = po.po_number;
             }
 

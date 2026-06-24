@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 import { inwardMovementSchema, transferMovementSchema, dispatchMovementSchema } from '@/lib/validations';
+import type { MovementLogWithNames, MovementLogRow, StockMasterRow } from '@/lib/db-types';
 
 export async function GET(
     request: NextRequest,
@@ -25,13 +26,13 @@ export async function GET(
             LEFT JOIN users u1 ON sml.moved_by_id = u1.id
             LEFT JOIN users u2 ON sml.approved_by_id = u2.id
             WHERE sml.movement_id = ?
-        `).get(id) as any;
+        `).get(id) as MovementLogWithNames | undefined;
 
         if (!movement) {
             return NextResponse.json({ success: false, error: 'Movement not found' }, { status: 404 });
         }
 
-        let cartons: any[] = [];
+        let cartons: StockMasterRow[] = [];
         if (movement.mc_numbers) {
             const mcList = movement.mc_numbers.split(',').map((mc: string) => mc.trim());
             const placeholders = mcList.map(() => '?').join(',');
@@ -40,7 +41,7 @@ export async function GET(
                 FROM fg_stock_master f
                 LEFT JOIN store_sections s ON f.section_id = s.id
                 WHERE f.mc_number IN (${placeholders})
-            `).all(...mcList);
+            `).all(...mcList) as (StockMasterRow & { section_name: string | null })[];
         }
 
         return NextResponse.json({ success: true, data: { ...movement, cartons } });
@@ -66,7 +67,7 @@ export async function PUT(
         const body = await request.json();
 
         // 2. Fetch current movement
-        const movement = db.prepare('SELECT * FROM stock_movement_log WHERE movement_id = ?').get(id) as any;
+        const movement = db.prepare('SELECT * FROM stock_movement_log WHERE movement_id = ?').get(id) as MovementLogRow | undefined;
 
         if (!movement) {
             return NextResponse.json({ success: false, error: 'Movement not found' }, { status: 404 });
@@ -99,17 +100,17 @@ export async function PUT(
         else return NextResponse.json({ success: false, error: 'Invalid action type' }, { status: 400 });
 
         if (!validation.success) {
-            const error = validation.error as any;
+            const error = validation.error as unknown as { errors: Array<{ message: string }> };
             return NextResponse.json({ success: false, error: error.errors[0].message }, { status: 400 });
         }
 
-        const validData = validation.data;
+        const validData = validation.data as { variety?: string; packing?: string; grade?: string; qty?: number; remarks?: string | null; allocationStrategy?: string; fromStore?: string; toStore?: string };
         const { variety, packing, grade, qty } = validData;
-        const remarks = (validData as any).remarks || null;
-        const allocationStrategy = (validData as any).allocationStrategy || 'FIFO';
+        const remarks = validData.remarks || null;
+        const allocationStrategy = validData.allocationStrategy || 'FIFO';
         // Extract locations
-        const fromLoc = (validData as any).fromStore || null;
-        const toLoc = (validData as any).toStore || null;
+        const fromLoc = validData.fromStore || null;
+        const toLoc = validData.toStore || null;
 
         // 5. Update Database
         const updateStmt = db.prepare(`
